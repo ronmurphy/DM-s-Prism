@@ -1,0 +1,5 @@
+{
+  "name": "Copy of Dungeon Master's Prism",
+  "description": "A comprehensive VTT with 2D/3D maps, Gemini-powered map generation/editing, dice rolling, and chat.",
+  "requestFramePermissions": []
+}
