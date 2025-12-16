@@ -3,6 +3,12 @@ export type Role = 'DM' | 'PLAYER';
 
 export type StatusEffect = 'Blinded' | 'Charmed' | 'Deafened' | 'Frightened' | 'Grappled' | 'Incapacitated' | 'Invisible' | 'Paralyzed' | 'Petrified' | 'Poisoned' | 'Prone' | 'Restrained' | 'Stunned' | 'Unconscious';
 
+export interface Ability {
+  name: string;
+  type: 'action' | 'reaction' | 'bonus' | 'spell' | 'legendary' | 'passive';
+  description: string;
+}
+
 export interface Token {
   id: string;
   name: string;
@@ -20,6 +26,7 @@ export interface Token {
   statusEffects: StatusEffect[];
   avatarUrl?: string; // Custom image
   characterSheetId?: string; // Link to full char sheet
+  abilities?: Ability[]; // Stat block actions
 }
 
 export interface ChatMessage {
@@ -57,6 +64,20 @@ export interface Spell {
   components: string;
   duration: string;
   description: string;
+}
+
+export interface Monster {
+  name: string;
+  source?: string; // e.g., "MM", "XMM"
+  avatarUrl?: string; // Constructed URL
+  type: string;
+  ac: number;
+  hp: number;
+  speed: number;
+  stats: { str: number; dex: number; con: number; int: number; wis: number; cha: number };
+  actions?: { name: string; desc: string }[];
+  abilities?: Ability[];
+  cr?: string;
 }
 
 export interface Character {

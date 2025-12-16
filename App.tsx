@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   Shield, Users, Box, Eye, MessageSquare, 
   Settings, Upload, Zap, Wand2, Sword, BookOpen, LogOut, FileText, SkipForward,
   ChevronLeft, ChevronRight, Menu
 } from 'lucide-react';
-import { MapData, Token, ChatMessage, Role, DiceRoll, User, Character } from './types';
+import { MapData, Token, ChatMessage, Role, DiceRoll, User, Character, Monster } from './types';
 import DiceRoller from './components/DiceRoller';
 import ChatWindow from './components/ChatWindow';
 import MapRenderer from './components/MapRenderer';
@@ -15,7 +16,7 @@ import TokenEditor from './components/TokenEditor';
 import CharacterSheet from './components/CharacterSheet';
 import { editMapImage } from './services/geminiService';
 import { supabase } from './lib/supabaseClient';
-import { mapTokenFromDB, mapMessageFromDB, updateTokenInDB, sendMessageToDB, uploadMapImage, createTokenInDB, mapCharFromDB } from './services/supabaseService';
+import { mapTokenFromDB, mapMessageFromDB, updateTokenInDB, sendMessageToDB, uploadMapImage, createTokenInDB, mapCharFromDB, deleteTokenFromDB } from './services/supabaseService';
 
 const DEFAULT_MAP_URL = 'https://picsum.photos/1200/800'; 
 
@@ -93,9 +94,9 @@ const App: React.FC = () => {
             if (payload.eventType === 'INSERT') {
                 setTokens(prev => [...prev, mapTokenFromDB(payload.new)]);
             } else if (payload.eventType === 'UPDATE') {
-                setTokens(prev => prev.map(t => t.id === payload.new.id ? mapTokenFromDB(payload.new) : t));
+                setTokens(prev => prev.map(t => t.id === String(payload.new.id) ? mapTokenFromDB(payload.new) : t));
             } else if (payload.eventType === 'DELETE') {
-                setTokens(prev => prev.filter(t => t.id !== payload.old.id));
+                setTokens(prev => prev.filter(t => t.id !== String(payload.old.id)));
             }
         }
     )
@@ -213,9 +214,45 @@ const App: React.FC = () => {
     }
   };
 
+  const handleTokenDrop = async (monster: Monster, x: number, y: number) => {
+      if (user?.role !== 'DM') return;
+
+      // Auto-Roll Initiative
+      const dex = monster.stats.dex || 10;
+      const mod = Math.floor((dex - 10) / 2);
+      const initiative = Math.floor(Math.random() * 20) + 1 + mod;
+
+      const newToken: Token = {
+          id: '', // Supabase will gen
+          name: monster.name,
+          x, y,
+          type: 'enemy',
+          color: '#ef4444',
+          hp: monster.hp,
+          maxHp: monster.hp,
+          ac: monster.ac,
+          speed: monster.speed,
+          remainingMovement: monster.speed,
+          size: 1,
+          initiative: initiative, // Set the rolled init
+          statusEffects: [],
+          avatarUrl: monster.avatarUrl,
+          abilities: monster.abilities
+      };
+
+      await createTokenInDB(newToken);
+      handleSendMessage(`Spawned ${monster.name} at (${x},${y}). Initiative: ${initiative} (${initiative - mod} + ${mod})`, 'system');
+  };
+
   const handleUpdateToken = (updated: Token) => {
     setTokens(prev => prev.map(t => t.id === updated.id ? updated : t));
     updateTokenInDB(updated);
+  };
+
+  const handleDeleteToken = async (tokenId: string) => {
+      setTokens(prev => prev.filter(t => t.id !== tokenId));
+      if (activeTokenId === tokenId) setActiveTokenId(null);
+      await deleteTokenFromDB(tokenId);
   };
 
   const handleSendMessage = (content: string, type: 'public' | 'whisper' | 'system', recipient?: string) => {
@@ -230,7 +267,7 @@ const App: React.FC = () => {
   };
 
   const handleDiceRoll = (roll: DiceRoll) => {
-    const content = `Rolled ${roll.formula}: ${roll.total} (${roll.breakdown})`;
+    const content = `Rolled ${roll.formula}: ${roll.total} ${roll.breakdown}`;
     handleSendMessage(content, 'system');
   };
 
@@ -409,6 +446,7 @@ const App: React.FC = () => {
                     activeTokenId={activeTokenId}
                     role={user.role}
                     onUpdateToken={handleUpdateToken}
+                    onDeleteToken={handleDeleteToken}
                     onNextTurn={handleNextTurn}
                     onResetCombat={handleResetCombat}
                 />
@@ -426,10 +464,14 @@ const App: React.FC = () => {
              onTokenMove={handleTokenMove}
              onFogReveal={handleFogReveal}
              onTokenClick={(t) => {
+               // Just Select (handled by changing activeTokenId for this demo, or we could add a separate 'selectedId')
+               // For now, let's treat clicking as "Selecting for Turn/Focus" if it's the DM
                if (user.role === 'DM') {
-                 setEditingToken(t);
+                   setActiveTokenId(t.id);
                }
              }}
+             onTokenEdit={(t) => setEditingToken(t)}
+             onTokenDrop={handleTokenDrop}
            />
 
            {/* Toggle Buttons Floating on Map */}
@@ -568,6 +610,7 @@ const App: React.FC = () => {
                setEditingToken(null);
              }}
              onCancel={() => setEditingToken(null)}
+             onRoll={handleDiceRoll}
            />
         )}
 

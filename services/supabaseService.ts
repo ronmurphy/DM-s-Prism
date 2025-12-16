@@ -1,10 +1,11 @@
+
 import { supabase } from '../lib/supabaseClient';
 import { Token, MapData, ChatMessage, Character } from '../types';
 
 // --- Mappers ---
 
 export const mapTokenFromDB = (row: any): Token => ({
-  id: row.id,
+  id: String(row.id),
   name: row.name,
   x: row.x,
   y: row.y,
@@ -19,30 +20,40 @@ export const mapTokenFromDB = (row: any): Token => ({
   initiative: row.initiative,
   statusEffects: row.status_effects || [],
   avatarUrl: row.avatar_url,
-  characterSheetId: row.character_sheet_id
+  characterSheetId: row.character_sheet_id,
+  // If the DB doesn't have the column yet, this will be undefined, defaulting to []
+  abilities: row.abilities || [] 
 });
 
-export const mapTokenToDB = (token: Token) => ({
-  // We generally don't send ID for inserts if auto-generated, but for updates we use it for query
-  name: token.name,
-  x: token.x,
-  y: token.y,
-  type: token.type,
-  color: token.color,
-  hp: token.hp,
-  max_hp: token.maxHp,
-  ac: token.ac,
-  speed: token.speed,
-  remaining_movement: token.remainingMovement,
-  size: token.size,
-  initiative: token.initiative,
-  status_effects: token.statusEffects,
-  avatar_url: token.avatarUrl,
-  character_sheet_id: token.characterSheetId || null
-});
+export const mapTokenToDB = (token: Token) => {
+  // SAFETY: We create a payload that matches the CURRENT known schema.
+  // Note: To persist abilities, you must add a 'jsonb' column named 'abilities' to your 'tokens' table in Supabase.
+  const payload: any = {
+    name: token.name,
+    x: token.x,
+    y: token.y,
+    type: token.type,
+    color: token.color,
+    hp: token.hp,
+    max_hp: token.maxHp,
+    ac: token.ac,
+    speed: token.speed,
+    remaining_movement: token.remainingMovement,
+    size: token.size,
+    initiative: token.initiative,
+    status_effects: token.statusEffects,
+    avatar_url: token.avatarUrl,
+    character_sheet_id: token.characterSheetId || null,
+  };
+
+  // Only attempt to attach abilities if we know the schema supports it (currently disabled to fix crash)
+  // payload.abilities = token.abilities || []; 
+  
+  return payload;
+};
 
 export const mapMessageFromDB = (row: any): ChatMessage => ({
-  id: row.id.toString(),
+  id: String(row.id),
   sender: row.sender,
   role: row.role,
   content: row.content,
@@ -52,7 +63,7 @@ export const mapMessageFromDB = (row: any): ChatMessage => ({
 });
 
 export const mapCharFromDB = (row: any): Character => ({
-  id: row.id,
+  id: String(row.id),
   name: row.name,
   class: row.class,
   level: row.level,
@@ -105,6 +116,11 @@ export const createTokenInDB = async (token: Token) => {
     const payload = mapTokenToDB(token);
     const { error } = await supabase.from('tokens').insert(payload);
     if (error) console.error("Error creating token:", error.message || error);
+};
+
+export const deleteTokenFromDB = async (tokenId: string) => {
+    const { error } = await supabase.from('tokens').delete().eq('id', tokenId);
+    if (error) console.error("Error deleting token:", error.message || error);
 };
 
 export const sendMessageToDB = async (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => {
