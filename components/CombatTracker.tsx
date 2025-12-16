@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Token, StatusEffect, Role } from '../types';
-import { Sword, Heart, Shield, Activity, Skull, SkipForward, RefreshCw, Hourglass, Trash2 } from 'lucide-react';
+import { Sword, Heart, Shield, Activity, Skull, SkipForward, RefreshCw, Hourglass, Trash2, Check, X } from 'lucide-react';
 
 interface CombatTrackerProps {
   tokens: Token[];
@@ -29,6 +29,7 @@ const CombatTracker: React.FC<CombatTrackerProps> = ({
   onResetCombat 
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const activeRef = useRef<HTMLDivElement>(null);
 
   // Sort by initiative descending
@@ -84,16 +85,19 @@ const CombatTracker: React.FC<CombatTrackerProps> = ({
         {sortedTokens.map((token, index) => {
           const isActive = token.id === activeTokenId;
           const isEditing = editingId === token.id;
+          const isDeleting = deleteConfirmId === token.id;
 
           return (
             <div 
               key={token.id} 
               ref={isActive ? activeRef : null}
-              // Z-Index Logic: Editing items must be highest (z-50). Active items next (z-10). Others z-0.
-              // We also remove opacity-90 from inactive items to simplify stacking context issues.
-              className={`border rounded-lg p-3 relative group transition-all duration-300 
-                  ${isActive ? 'bg-indigo-900/40 border-indigo-500 shadow-lg shadow-indigo-500/20 scale-[1.02] z-10' : 'bg-slate-800 border-slate-700'}
-                  ${isEditing ? 'z-50' : ''} 
+              onMouseLeave={() => {
+                  // Auto-close menus if mouse leaves the card
+                  if (deleteConfirmId === token.id) setDeleteConfirmId(null);
+              }}
+              className={`border rounded-lg p-3 relative group transition-colors duration-200
+                  ${isActive ? 'bg-indigo-900/40 border-indigo-500 shadow-md' : 'bg-slate-800 border-slate-700'}
+                  ${isEditing ? 'z-50' : 'z-0'} 
               `}
             >
               {isActive && (
@@ -128,7 +132,7 @@ const CombatTracker: React.FC<CombatTrackerProps> = ({
               </div>
 
               {/* Controls */}
-              <div className="flex items-center gap-2 mb-2 opacity-50 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-2 mb-2 relative z-30">
                  {/* HP Controls */}
                  <div className="flex flex-1 gap-1">
                     <button onClick={() => handleHpChange(token, -1)} className="px-2 py-0.5 bg-red-900/50 hover:bg-red-900 border border-red-800 rounded text-xs text-red-200 flex-1">-1</button>
@@ -136,25 +140,51 @@ const CombatTracker: React.FC<CombatTrackerProps> = ({
                     <button onClick={() => handleHpChange(token, 1)} className="px-2 py-0.5 bg-green-900/50 hover:bg-green-900 border border-green-800 rounded text-xs text-green-200 flex-1">+1</button>
                  </div>
                  
-                 {/* Delete Button (DM Only) */}
+                 {/* Delete Button (DM Only) with In-Place Confirmation */}
                  {role === 'DM' && (
-                     <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if(window.confirm(`Delete ${token.name}?`)) {
-                                onDeleteToken(token.id);
-                            }
-                        }}
-                        className="p-1 hover:text-red-500 text-slate-500"
-                        title="Delete Token"
-                     >
-                         <Trash2 size={12} />
-                     </button>
+                     <div className="flex items-center">
+                        {isDeleting ? (
+                            <div className="flex gap-1 animate-fade-in-right">
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onDeleteToken(token.id);
+                                        setDeleteConfirmId(null);
+                                    }}
+                                    className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded shadow-lg border border-red-400"
+                                    title="Confirm Delete"
+                                >
+                                    <Check size={14} />
+                                </button>
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDeleteConfirmId(null);
+                                    }}
+                                    className="p-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded shadow-lg border border-slate-500"
+                                    title="Cancel"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        ) : (
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirmId(token.id);
+                                }}
+                                className="flex items-center justify-center p-1.5 bg-slate-800 hover:bg-red-900 text-slate-400 hover:text-white border border-slate-600 hover:border-red-500 rounded transition-colors cursor-pointer"
+                                title="Delete Token"
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        )}
+                     </div>
                  )}
               </div>
 
               {/* Status Effects */}
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1 relative z-10">
                 {token.statusEffects.map(effect => (
                   <span 
                     key={effect} 
@@ -174,7 +204,7 @@ const CombatTracker: React.FC<CombatTrackerProps> = ({
 
               {/* Status Effect Dropdown */}
               {isEditing && (
-                <div className="absolute top-full left-0 w-full bg-slate-800 border border-slate-600 rounded-b shadow-xl z-50 p-2 grid grid-cols-2 gap-1 mt-1">
+                <div className="absolute top-full left-0 w-full bg-slate-800 border border-slate-600 rounded-b shadow-xl z-50 p-2 grid grid-cols-2 gap-1 mt-1 animate-fade-in">
                   {STATUS_EFFECTS.map(effect => (
                     <button
                       key={effect}

@@ -92,11 +92,23 @@ const App: React.FC = () => {
         { event: '*', schema: 'public', table: 'tokens' }, 
         (payload) => {
             if (payload.eventType === 'INSERT') {
-                setTokens(prev => [...prev, mapTokenFromDB(payload.new)]);
+                const newToken = mapTokenFromDB(payload.new);
+                setTokens(prev => {
+                    // Prevent duplicates based on ID
+                    if (prev.some(t => String(t.id) === String(newToken.id))) return prev;
+                    return [...prev, newToken];
+                });
             } else if (payload.eventType === 'UPDATE') {
-                setTokens(prev => prev.map(t => t.id === String(payload.new.id) ? mapTokenFromDB(payload.new) : t));
+                const updatedToken = mapTokenFromDB(payload.new);
+                setTokens(prev => prev.map(t => String(t.id) === String(updatedToken.id) ? updatedToken : t));
             } else if (payload.eventType === 'DELETE') {
-                setTokens(prev => prev.filter(t => t.id !== String(payload.old.id)));
+                // Safety check for payload.old
+                if (payload.old && payload.old.id) {
+                    const deletedId = String(payload.old.id);
+                    setTokens(prev => prev.filter(t => String(t.id) !== deletedId));
+                    // Also clear active token if it was the one deleted
+                    setActiveTokenId(current => (String(current) === deletedId ? null : current));
+                }
             }
         }
     )
@@ -250,26 +262,26 @@ const App: React.FC = () => {
   };
 
   const handleDeleteToken = async (tokenId: string) => {
-      const tokenToDelete = tokens.find(t => t.id === tokenId);
-      if (!tokenToDelete) {
-          console.error('Token not found:', tokenId);
-          return;
+      const targetId = String(tokenId); // Ensure string
+      
+      // 1. Optimistic Update (Immediate Removal)
+      setTokens(prev => prev.filter(t => String(t.id) !== targetId));
+      
+      // 2. Clear Active Token if needed
+      if (activeTokenId && String(activeTokenId) === targetId) {
+          setActiveTokenId(null);
       }
-
-      console.log('Attempting to delete token:', tokenId, tokenToDelete.name);
-
-      // Delete from database first
-      const success = await deleteTokenFromDB(tokenId);
-
-      if (success) {
-          // Only update local state if DB delete succeeded
-          setTokens(prev => prev.filter(t => t.id !== tokenId));
-          if (activeTokenId === tokenId) setActiveTokenId(null);
-          handleSendMessage(`${tokenToDelete.name} removed from combat.`, 'system');
-      } else {
-          // Show error to user if delete failed
-          handleSendMessage(`❌ Failed to remove ${tokenToDelete.name}. Check console for details.`, 'system');
-          alert(`Failed to delete ${tokenToDelete.name}. This might be a database permissions issue.`);
+      
+      // 3. Database Deletion
+      const { error } = await deleteTokenFromDB(targetId);
+      
+      if (error) {
+          console.error(`DB Delete Failed:`, error);
+          alert(`Failed to delete token: ${error.message}`);
+          
+          // Revert/Sync state on failure
+          const { data } = await supabase.from('tokens').select('*');
+          if (data) setTokens(data.map(mapTokenFromDB));
       }
   };
 
@@ -454,7 +466,7 @@ const App: React.FC = () => {
         <aside className={`${showCombatSidebar ? 'w-80' : 'w-0'} transition-all duration-300 bg-slate-900 border-r border-slate-800 flex flex-col z-20 shrink-0`}>
              <div className="p-3 bg-slate-900 border-b border-slate-700 flex justify-between items-center whitespace-nowrap overflow-hidden">
                 <span className="font-bold text-slate-200 flex items-center gap-2">
-                   <Sword size={16} className="text-red-500" /> Initiative
+                   <Sword size={16} className="text-red-500" /> Combat
                 </span>
                 {/* Close Button Inside (optional, redundant with map toggle but good UX) */}
              </div>
