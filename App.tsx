@@ -250,9 +250,27 @@ const App: React.FC = () => {
   };
 
   const handleDeleteToken = async (tokenId: string) => {
-      setTokens(prev => prev.filter(t => t.id !== tokenId));
-      if (activeTokenId === tokenId) setActiveTokenId(null);
-      await deleteTokenFromDB(tokenId);
+      const tokenToDelete = tokens.find(t => t.id === tokenId);
+      if (!tokenToDelete) {
+          console.error('Token not found:', tokenId);
+          return;
+      }
+
+      console.log('Attempting to delete token:', tokenId, tokenToDelete.name);
+
+      // Delete from database first
+      const success = await deleteTokenFromDB(tokenId);
+
+      if (success) {
+          // Only update local state if DB delete succeeded
+          setTokens(prev => prev.filter(t => t.id !== tokenId));
+          if (activeTokenId === tokenId) setActiveTokenId(null);
+          handleSendMessage(`${tokenToDelete.name} removed from combat.`, 'system');
+      } else {
+          // Show error to user if delete failed
+          handleSendMessage(`❌ Failed to remove ${tokenToDelete.name}. Check console for details.`, 'system');
+          alert(`Failed to delete ${tokenToDelete.name}. This might be a database permissions issue.`);
+      }
   };
 
   const handleSendMessage = (content: string, type: 'public' | 'whisper' | 'system', recipient?: string) => {
@@ -436,7 +454,7 @@ const App: React.FC = () => {
         <aside className={`${showCombatSidebar ? 'w-80' : 'w-0'} transition-all duration-300 bg-slate-900 border-r border-slate-800 flex flex-col z-20 shrink-0`}>
              <div className="p-3 bg-slate-900 border-b border-slate-700 flex justify-between items-center whitespace-nowrap overflow-hidden">
                 <span className="font-bold text-slate-200 flex items-center gap-2">
-                   <Sword size={16} className="text-red-500" /> Combat
+                   <Sword size={16} className="text-red-500" /> Initiative
                 </span>
                 {/* Close Button Inside (optional, redundant with map toggle but good UX) */}
              </div>

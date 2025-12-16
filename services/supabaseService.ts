@@ -118,9 +118,13 @@ export const createTokenInDB = async (token: Token) => {
     if (error) console.error("Error creating token:", error.message || error);
 };
 
-export const deleteTokenFromDB = async (tokenId: string) => {
-    const { error } = await supabase.from('tokens').delete().eq('id', tokenId);
-    if (error) console.error("Error deleting token:", error.message || error);
+export const deleteTokenFromDB = async (tokenId: string): Promise<boolean> => {
+    const { error, count } = await supabase.from('tokens').delete().eq('id', tokenId);
+    if (error) {
+        console.error("Error deleting token:", error.message || error);
+        return false;
+    }
+    return true;
 };
 
 export const sendMessageToDB = async (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => {
