@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Character } from "../types";
 
@@ -15,6 +16,7 @@ export const editMapImage = async (currentImageBase64: string, prompt: string): 
     throw new Error("API Key not found");
   }
 
+  // Initialize client with API key from environment
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const base64Data = stripDataUrl(currentImageBase64);
@@ -50,11 +52,12 @@ export const editMapImage = async (currentImageBase64: string, prompt: string): 
 export const parseCharacterPdf = async (pdfBase64: string): Promise<Omit<Character, 'id' | 'avatarUrl' | 'ddbLink'>> => {
   if (!process.env.API_KEY) throw new Error("API Key not found");
   
+  // Use gemini-3-flash-preview for data extraction from PDF
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const base64Data = stripDataUrl(pdfBase64);
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [
         { inlineData: { mimeType: 'application/pdf', data: base64Data } },

@@ -1,108 +1,55 @@
 
-import { Monster, Ability } from "../types";
-import { getCompendiumData, saveCompendiumData } from "./dbService";
+import { Monster, Ability, Spell } from "../types";
+import { 
+    getCompendiumData, saveCompendiumData, getAllCompendiumEntries, getAllCompendiumKeys,
+    saveSpellCompendiumData, getSpellCompendiumData, getAllSpellCompendiumEntries, getAllSpellCompendiumKeys
+} from "./dbService";
 
-// Updated to a working mirror
-const BASE_URL = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-mirror-3.github.io/master/data/bestiary/";
+const BESTIARY_URL = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-mirror-3.github.io/master/data/bestiary/";
+const SPELL_URL = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-mirror-3.github.io/master/data/spells/";
 
-// We will cache the fetched data in memory after loading from DB/Network
 let cachedBestiary: any[] = [];
-let isLoaded = false;
-let isLoading = false;
+let cachedSpells: any[] = [];
+let isBestiaryLoaded = false;
+let isSpellsLoaded = false;
 
-// Priority sources to "install" locally
-const SOURCES_TO_LOAD = [
-    "bestiary-mm.json",     // Monster Manual
-    "bestiary-mpmm.json",   // Mordenkainen Presents: Monsters of the Multiverse
-    "bestiary-vrgr.json",   // Van Richten's Guide to Ravenloft
-    "bestiary-mtf.json",    // Mordenkainen's Tome of Foes
-    "bestiary-vgm.json"     // Volo's Guide to Monsters
-];
-
-export const getCompendiumStatus = async () => {
-    let totalCached = 0;
-    let missingFiles = [];
-
-    for (const file of SOURCES_TO_LOAD) {
-        const data = await getCompendiumData(file);
-        if (data && Array.isArray(data)) {
-            totalCached += data.length;
-        } else {
-            missingFiles.push(file);
-        }
-    }
-    return { totalCached, missingFiles, isComplete: missingFiles.length === 0 };
+const SCHOOL_MAP: Record<string, string> = {
+    'A': 'Abjuration',
+    'C': 'Conjuration',
+    'D': 'Divination',
+    'E': 'Enchantment',
+    'V': 'Evocation',
+    'I': 'Illusion',
+    'N': 'Necromancy',
+    'T': 'Transmutation'
 };
 
-export const load5eToolsData = async (forceDownload = false, onProgress?: (msg: string) => void) => {
-    // If forcing download, ignore isLoaded check
-    if (isLoaded && !forceDownload) return;
-    if (isLoading) return;
-    isLoading = true;
-    
-    try {
-        const newMonsters: any[] = [];
-        cachedBestiary = []; // Clear memory cache to rebuild
-
-        // Iterate through sources
-        for (const file of SOURCES_TO_LOAD) {
-            let data = null;
-            
-            // 1. Try Local DB Cache (unless forcing download)
-            if (!forceDownload) {
-                data = await getCompendiumData(file);
-            }
-
-            if (data && Array.isArray(data) && data.length > 0) {
-                console.log(`%c[Cache Hit] Loaded ${file} from IndexedDB (${data.length} monsters)`, 'color: #4ade80');
-                newMonsters.push(...data);
-            } else {
-                // 2. Fetch from Network
-                const msg = `Downloading ${file} from mirror...`;
-                console.log(`%c[Network] ${msg}`, 'color: #facc15');
-                if (onProgress) onProgress(msg);
-                
-                try {
-                    const res = await fetch(BASE_URL + file);
-                    if (!res.ok) throw new Error(`Failed to load ${file} (Status: ${res.status})`);
-                    const json = await res.json();
-                    
-                    if (json.monster && Array.isArray(json.monster)) {
-                         // 3. Save to Local DB
-                         await saveCompendiumData(file, json.monster);
-                         newMonsters.push(...json.monster);
-                         console.log(`%c[Cache Save] Saved ${file} to IndexedDB`, 'color: #4ade80');
-                    }
-                } catch (err) {
-                    console.warn(`Failed to fetch ${file}:`, err);
-                }
-            }
-        }
-
-        cachedBestiary = newMonsters; // Replace memory cache
-        isLoaded = true;
-        
-        if (onProgress) onProgress(`Compendium Ready: ${cachedBestiary.length} monsters.`);
-        console.log(`Compendium Fully Loaded: ${cachedBestiary.length} monsters available.`);
-    } catch (e) {
-        console.error("Critical error loading 5e.tools data", e);
-        if (onProgress) onProgress("Error loading data. Check console.");
-    } finally {
-        isLoading = false;
-    }
-};
+const formatText = (text: string): string => {
+    if (!text) return "";
+    return text
+        .replace(/{@atk mw}/g, "Melee Weapon Attack:")
+        .replace(/{@atk rw}/g, "Ranged Weapon Attack:")
+        .replace(/{@atk ms,rs}/g, "Melee or Ranged Spell Attack:")
+        .replace(/{@hit (\d+)}/g, "+$1")
+        .replace(/{@h}/g, "Hit: ")
+        .replace(/{@damage (.*?)}/g, "$1")
+        .replace(/{@dc (\d+)}/g, "DC $1")
+        .replace(/{@recharge (\d+)}/g, "(Recharge $1-6)")
+        .replace(/{@tag (.*?)}/g, "$1") 
+        .replace(/{@\w+ (.*?)\|(.*?)}/g, "$2") 
+        .replace(/{@\w+ (.*?)}/g, "$1"); 
+}
 
 const mapSize = (size: any): number => {
     if (!size) return 1;
-    // 5e.tools uses S, M, L, H, G, T in array or string
     const s = Array.isArray(size) ? size[0] : size;
     switch(s) {
-        case 'T': return 1; // Tiny
-        case 'S': return 1; // Small
-        case 'M': return 1; // Medium
-        case 'L': return 2; // Large
-        case 'H': return 3; // Huge
-        case 'G': return 4; // Gargantuan
+        case 'T': return 1; 
+        case 'S': return 1; 
+        case 'M': return 1; 
+        case 'L': return 2; 
+        case 'H': return 3; 
+        case 'G': return 4; 
         default: return 1;
     }
 };
@@ -122,7 +69,6 @@ const mapAc = (ac: any): number => {
     if (!ac) return 10;
     if (typeof ac === 'number') return ac;
     if (Array.isArray(ac)) {
-        // Can be [{ac: 15, from: [...]}] or just [15]
         const first = ac[0];
         if (typeof first === 'number') return first;
         if (first && first.ac) return first.ac;
@@ -141,7 +87,6 @@ const mapSpeed = (speed: any): number => {
     if (!speed) return 30;
     if (typeof speed === 'number') return speed;
     if (speed.walk) return speed.walk;
-    // Sometimes it's just fly/swim, fallback to max
     if (typeof speed === 'object') {
         const vals = Object.values(speed).filter(v => typeof v === 'number') as number[];
         if (vals.length > 0) return Math.max(...vals);
@@ -149,83 +94,104 @@ const mapSpeed = (speed: any): number => {
     return 30;
 }
 
-const formatText = (text: string): string => {
-    if (!text) return "";
-    return text
-        .replace(/{@atk mw}/g, "Melee Weapon Attack:")
-        .replace(/{@atk rw}/g, "Ranged Weapon Attack:")
-        .replace(/{@atk ms,rs}/g, "Melee or Ranged Spell Attack:")
-        .replace(/{@hit (\d+)}/g, "+$1")
-        .replace(/{@h}/g, "Hit: ")
-        .replace(/{@damage (.*?)}/g, "$1")
-        .replace(/{@dc (\d+)}/g, "DC $1")
-        .replace(/{@recharge (\d+)}/g, "(Recharge $1-6)")
-        .replace(/{@tag (.*?)}/g, "$1") 
-        .replace(/{@\w+ (.*?)\|(.*?)}/g, "$2") // {@creature goblin|notes} -> notes
-        .replace(/{@\w+ (.*?)}/g, "$1"); // {@spell fireball} -> fireball
-}
+const parseSpellTime = (time: any[]): string => {
+    if (!time || !time.length) return "1 Action";
+    return time.map(t => `${t.number} ${t.unit}${t.number > 1 ? 's' : ''}`).join(', ');
+};
 
-export const search5eTools = async (query: string, onProgress?: (msg: string) => void): Promise<Monster[]> => {
-    // Ensure data is loaded (will use cache if available)
-    await load5eToolsData(false, onProgress);
-    
-    if (!cachedBestiary.length) return [];
+const parseSpellRange = (range: any): string => {
+    if (!range) return "Unknown";
+    if (range.type === 'point' && range.distance) {
+        return `${range.distance.amount || ''} ${range.distance.type || 'feet'}`.trim();
+    }
+    if (range.type === 'special') return "Special";
+    return range.type.charAt(0).toUpperCase() + range.type.slice(1);
+};
 
-    const lowerQuery = query.toLowerCase();
+const parseSpellComponents = (comp: any): string => {
+    if (!comp) return "";
+    const parts = [];
+    if (comp.v) parts.push("V");
+    if (comp.s) parts.push("S");
+    if (comp.m) {
+        const material = typeof comp.m === 'string' ? comp.m : (comp.m.text || "M");
+        parts.push(`M (${material})`);
+    }
+    return parts.join(', ');
+};
+
+const parseSpellDuration = (duration: any[]): string => {
+    if (!duration || !duration.length) return "Instantaneous";
+    return duration.map(d => {
+        if (d.type === 'instant') return "Instantaneous";
+        if (d.type === 'timed' && d.duration) {
+            let str = `${d.duration.amount} ${d.duration.type}${d.duration.amount > 1 ? 's' : ''}`;
+            if (d.concentration) str = "Concentration, up to " + str;
+            return str;
+        }
+        return d.type;
+    }).join(', ');
+};
+
+export const getCompendiumStatus = async () => {
+    let totalCached = 0;
+    const keys = await getAllCompendiumKeys();
+    for (const key of keys) {
+        const data = await getCompendiumData(key);
+        if (data) totalCached += data.length;
+    }
+    return { totalCached, totalFiles: keys.length, isComplete: true };
+};
+
+export const getSpellCompendiumStatus = async () => {
+    let totalCached = 0;
+    const keys = await getAllSpellCompendiumKeys();
+    for (const key of keys) {
+        const data = await getSpellCompendiumData(key);
+        if (data) totalCached += data.length;
+    }
+    return { totalCached, totalFiles: keys.length };
+};
+
+export const load5eToolsData = async (force = false) => {
+    if (isBestiaryLoaded && !force) return;
+    const all = await getAllCompendiumEntries();
+    cachedBestiary = all.flat();
+    isBestiaryLoaded = true;
+};
+
+export const load5eToolsSpellData = async (force = false) => {
+    if (isSpellsLoaded && !force) return;
+    const all = await getAllSpellCompendiumEntries();
+    cachedSpells = all.flat();
+    isSpellsLoaded = true;
+};
+
+export const search5eTools = async (query: string): Promise<Monster[]> => {
+    await load5eToolsData();
+    const lower = query.toLowerCase();
+    const matches = cachedBestiary.filter(m => m.name && m.name.toLowerCase().includes(lower));
     
-    // Filter matches
-    const matches = cachedBestiary.filter(m => m.name && m.name.toLowerCase().includes(lowerQuery));
-    
-    // Limit to 20 to prevent UI lag
-    return matches.slice(0, 20).map(m => {
+    return matches.slice(0, 30).map(m => {
         const source = m.source || "MM";
-        // 5e.tools token convention
-        const encodedName = encodeURIComponent(m.name);
-        const encodedSource = encodeURIComponent(source);
-        const avatarUrl = `https://5e.tools/img/bestiary/tokens/${encodedSource}/${encodedName}.webp`;
+        const avatarUrl = `https://5e.tools/img/bestiary/tokens/${encodeURIComponent(source)}/${encodeURIComponent(m.name)}.webp`;
         
         const abilities: Ability[] = [];
-        
-        if (m.action) {
-            m.action.forEach((a: any) => {
+        const processEntries = (arr: any[], type: any) => {
+            if (!arr) return;
+            arr.forEach(a => {
                 abilities.push({
                     name: a.name,
-                    type: 'action',
+                    type: type,
                     description: formatText(a.entries ? a.entries.join('\n') : '')
                 });
             });
-        }
-        
-        if (m.reaction) {
-            m.reaction.forEach((a: any) => {
-                 abilities.push({
-                    name: a.name,
-                    type: 'reaction',
-                    description: formatText(a.entries ? a.entries.join('\n') : '')
-                });
-            });
-        }
+        };
 
-        if (m.legendary) {
-            m.legendary.forEach((a: any) => {
-                abilities.push({
-                    name: a.name,
-                    type: 'legendary',
-                    description: formatText(a.entries ? a.entries.join('\n') : '')
-                });
-            });
-        }
-        
-        // Passive traits
-        if (m.trait) {
-            m.trait.forEach((a: any) => {
-                abilities.push({
-                    name: a.name,
-                    type: 'passive',
-                    description: formatText(a.entries ? a.entries.join('\n') : '')
-                });
-            });
-        }
+        processEntries(m.action, 'action');
+        processEntries(m.reaction, 'reaction');
+        processEntries(m.legendary, 'legendary');
+        processEntries(m.trait, 'passive');
 
         return {
             name: m.name,
@@ -236,16 +202,34 @@ export const search5eTools = async (query: string, onProgress?: (msg: string) =>
             hp: mapHp(m.hp),
             speed: mapSpeed(m.speed),
             stats: {
-                str: m.str || 10,
-                dex: m.dex || 10,
-                con: m.con || 10,
-                int: m.int || 10,
-                wis: m.wis || 10,
-                cha: m.cha || 10
+                str: m.str || 10, dex: m.dex || 10, con: m.con || 10,
+                int: m.int || 10, wis: m.wis || 10, cha: m.cha || 10
             },
             cr: m.cr ? (typeof m.cr === 'string' ? m.cr : m.cr.cr) : "Unknown",
             size: mapSize(m.size),
             abilities: abilities
+        };
+    });
+};
+
+export const search5eToolsSpells = async (query: string): Promise<Spell[]> => {
+    await load5eToolsSpellData();
+    const lower = query.toLowerCase();
+    const matches = cachedSpells.filter(s => s.name && s.name.toLowerCase().includes(lower));
+    
+    return matches.slice(0, 30).map(s => {
+        const entries = Array.isArray(s.entries) ? s.entries.map((e: any) => typeof e === 'string' ? e : (e.entries ? e.entries.join('\n') : '')).join('\n\n') : '';
+        const higher = s.entriesHigherLevel ? s.entriesHigherLevel.map((h: any) => h.entries.join('\n')).join('\n\n') : '';
+
+        return {
+            name: s.name,
+            level: s.level,
+            school: SCHOOL_MAP[s.school] || s.school,
+            castingTime: parseSpellTime(s.time),
+            range: parseSpellRange(s.range),
+            components: parseSpellComponents(s.components),
+            duration: parseSpellDuration(s.duration),
+            description: formatText(entries + (higher ? '\n\n' + higher : ''))
         };
     });
 };
