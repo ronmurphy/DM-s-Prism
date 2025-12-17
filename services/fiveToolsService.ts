@@ -180,10 +180,13 @@ export const search5eTools = async (query: string): Promise<Monster[]> => {
         const processEntries = (arr: any[], type: any) => {
             if (!arr) return;
             arr.forEach(a => {
+                const desc = Array.isArray(a.entries) 
+                  ? a.entries.map((e: any) => typeof e === 'string' ? e : (e.entries ? e.entries.join('\n') : '')).join('\n')
+                  : '';
                 abilities.push({
                     name: a.name,
                     type: type,
-                    description: formatText(a.entries ? a.entries.join('\n') : '')
+                    description: formatText(desc)
                 });
             });
         };
@@ -205,7 +208,7 @@ export const search5eTools = async (query: string): Promise<Monster[]> => {
                 str: m.str || 10, dex: m.dex || 10, con: m.con || 10,
                 int: m.int || 10, wis: m.wis || 10, cha: m.cha || 10
             },
-            cr: m.cr ? (typeof m.cr === 'string' ? m.cr : m.cr.cr) : "Unknown",
+            cr: m.cr ? (typeof m.cr === 'string' ? m.cr : (m.cr.cr || m.cr)) : "Unknown",
             size: mapSize(m.size),
             abilities: abilities
         };

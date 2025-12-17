@@ -97,7 +97,6 @@ const LibraryWindow: React.FC = () => {
       if (!files || files.length === 0) return;
   
       setIsSaving(`Analyzing ${files.length} items...`);
-      let processedCount = 0;
       
       const processFile = (file: File) => {
           return new Promise<void>((resolve) => {
@@ -108,11 +107,9 @@ const LibraryWindow: React.FC = () => {
                       if (json.monster || (Array.isArray(json) && json[0]?.ac)) {
                            let monsters = json.monster || json;
                            await saveCompendiumData(file.name, monsters);
-                           processedCount++;
                       } else if (json.spell || (Array.isArray(json) && json[0]?.school)) {
                            let spells = json.spell || json;
                            await saveSpellCompendiumData(file.name, spells);
-                           processedCount++;
                       }
                   } catch (err) { console.error(err); }
                   resolve();
@@ -207,33 +204,41 @@ const LibraryWindow: React.FC = () => {
                     <ArrowLeft size={12} /> Back to Results
                 </button>
                 <div className="flex gap-4 mb-4">
-                    {selectedMonster.avatarUrl && <img src={selectedMonster.avatarUrl} className="w-16 h-16 rounded-full border border-slate-600 bg-black object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>}
-                    <div>
-                        <h2 className="text-xl font-serif font-bold text-white">{selectedMonster.name}</h2>
-                        <div className="text-xs text-slate-400 italic">{selectedMonster.type} • CR {selectedMonster.cr}</div>
-                        <div className="flex gap-2 mt-2 text-xs">
-                                <span className="bg-green-900/50 text-green-300 px-2 py-1 rounded">HP {selectedMonster.hp}</span>
-                                <span className="bg-blue-900/50 text-blue-300 px-2 py-1 rounded">AC {selectedMonster.ac}</span>
+                    {selectedMonster.avatarUrl && <img src={selectedMonster.avatarUrl} alt="" className="w-16 h-16 rounded-full border border-slate-600 bg-black object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>}
+                    <div className="flex-1">
+                        <h2 className="text-xl font-serif font-bold text-white leading-tight">{selectedMonster.name}</h2>
+                        <div className="text-xs text-slate-400 italic mb-2 capitalize">{selectedMonster.type} • CR {selectedMonster.cr}</div>
+                        <div className="flex gap-2 text-[10px] font-bold uppercase">
+                                <span className="bg-green-900/40 text-green-300 px-2 py-1 rounded border border-green-800/50">HP {selectedMonster.hp}</span>
+                                <span className="bg-blue-900/40 text-blue-300 px-2 py-1 rounded border border-blue-800/50">AC {selectedMonster.ac}</span>
+                                <span className="bg-amber-900/40 text-amber-300 px-2 py-1 rounded border border-amber-800/50">SPD {selectedMonster.speed}ft</span>
                         </div>
                     </div>
                 </div>
                 
-                <div className="grid grid-cols-6 gap-1 text-center text-[10px] mb-4 bg-slate-950 p-2 rounded border border-slate-700">
-                    <div><div className="text-slate-500">STR</div><div className="font-bold">{selectedMonster.stats.str}</div></div>
-                    <div><div className="text-slate-500">DEX</div><div className="font-bold">{selectedMonster.stats.dex}</div></div>
-                    <div><div className="text-slate-500">CON</div><div className="font-bold">{selectedMonster.stats.con}</div></div>
-                    <div><div className="text-slate-500">INT</div><div className="font-bold">{selectedMonster.stats.int}</div></div>
-                    <div><div className="text-slate-500">WIS</div><div className="font-bold">{selectedMonster.stats.wis}</div></div>
-                    <div><div className="text-slate-500">CHA</div><div className="font-bold">{selectedMonster.stats.cha}</div></div>
+                <div className="grid grid-cols-6 gap-1 text-center text-[9px] mb-4 bg-slate-950 p-2 rounded border border-slate-700">
+                    <div><div className="text-slate-500 font-bold">STR</div><div className="text-white text-xs">{selectedMonster.stats.str}</div></div>
+                    <div><div className="text-slate-500 font-bold">DEX</div><div className="text-white text-xs">{selectedMonster.stats.dex}</div></div>
+                    <div><div className="text-slate-500 font-bold">CON</div><div className="text-white text-xs">{selectedMonster.stats.con}</div></div>
+                    <div><div className="text-slate-500 font-bold">INT</div><div className="text-white text-xs">{selectedMonster.stats.int}</div></div>
+                    <div><div className="text-slate-500 font-bold">WIS</div><div className="text-white text-xs">{selectedMonster.stats.wis}</div></div>
+                    <div><div className="text-slate-500 font-bold">CHA</div><div className="text-white text-xs">{selectedMonster.stats.cha}</div></div>
                 </div>
 
                 <div className="space-y-4">
-                    {selectedMonster.abilities?.map((ab, i) => (
-                        <div key={i} className="text-sm border-b border-slate-700/50 pb-2 last:border-0">
-                            <span className="font-bold text-indigo-300 block mb-1">{ab.name} <span className="text-[10px] text-slate-500 uppercase ml-1">({ab.type})</span></span>
-                            <span className="text-slate-400 text-xs whitespace-pre-line">{ab.description}</span>
-                        </div>
-                    ))}
+                    {selectedMonster.abilities && selectedMonster.abilities.length > 0 ? (
+                        selectedMonster.abilities.map((ab, i) => (
+                            <div key={i} className="text-sm border-b border-slate-700/50 pb-3 last:border-0">
+                                <div className="flex justify-between items-baseline mb-1">
+                                    <span className="font-bold text-indigo-300">{ab.name}</span>
+                                    <span className="text-[9px] text-slate-500 uppercase font-black tracking-widest">{ab.type}</span>
+                                </div>
+                                <div className="text-slate-300 text-xs leading-relaxed whitespace-pre-line">{ab.description}</div>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="text-center py-4 text-slate-600 text-xs italic">No ability details available.</div>
+                    )}
                 </div>
             </div>
         )}
@@ -259,7 +264,6 @@ const LibraryWindow: React.FC = () => {
             <div className="space-y-2">
                 {isSearching && <div className="text-center py-6 text-indigo-400"><Loader2 className="animate-spin mx-auto mb-2" /> Summoning Bestiary...</div>}
                 
-                {/* Source Identifier */}
                 {!isSearching && subTab === 'SEARCH' && resultSource && (
                     <div className="px-1 text-[10px] text-slate-600 flex justify-between items-center">
                         <span>Results from {resultSource === '5e.tools' ? 'Local Compendium' : 'Open5e API'}</span>
@@ -272,6 +276,7 @@ const LibraryWindow: React.FC = () => {
                         key={`${monster.name}-${idx}`} 
                         draggable 
                         onDragStart={(e) => handleDragStart(e, monster)} 
+                        onClick={() => setSelectedMonster(monster)}
                         className="p-3 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-indigo-500 rounded cursor-grab active:cursor-grabbing transition-all group relative flex gap-3 items-center shadow-md"
                     >
                         {monster.avatarUrl && (
@@ -304,12 +309,6 @@ const LibraryWindow: React.FC = () => {
                                             <Skull size={14}/>
                                         </button>
                                     )}
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); setSelectedMonster(monster); }} 
-                                        className="text-slate-500 hover:text-white transition-colors"
-                                    >
-                                        <Info size={14}/>
-                                    </button>
                                     <GripVertical size={16} className="text-slate-600 group-hover:text-indigo-400" />
                                 </div>
                             </div>
