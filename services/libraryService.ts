@@ -1,4 +1,7 @@
-import { Spell } from "../types";
+
+import { Spell, Monster } from "../types";
+import { searchMonstersOpen5e } from "./open5eService";
+import { search5eTools } from "./fiveToolsService";
 
 const MOCK_SPELLS: Spell[] = [
   {
@@ -56,4 +59,19 @@ const MOCK_SPELLS: Spell[] = [
 export const searchSpells = (query: string): Spell[] => {
   const lowerQuery = query.toLowerCase();
   return MOCK_SPELLS.filter(s => s.name.toLowerCase().includes(lowerQuery));
+};
+
+export const searchMonsters = async (query: string): Promise<{ monsters: Monster[], source: '5e.tools' | 'open5e' }> => {
+    // 1. Try 5e.tools (Preferred)
+    // We only try this if query length is reasonable to avoid massive filtering lag on small inputs if strict
+    const fiveToolsResults = await search5eTools(query);
+    
+    if (fiveToolsResults.length > 0) {
+        return { monsters: fiveToolsResults, source: '5e.tools' };
+    }
+    
+    // 2. Fallback to Open5e API
+    console.log("5e.tools yielded no results, falling back to Open5e...");
+    const { monsters: open5eResults } = await searchMonstersOpen5e(query);
+    return { monsters: open5eResults, source: 'open5e' };
 };

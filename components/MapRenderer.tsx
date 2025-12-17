@@ -1,28 +1,9 @@
-
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { MapData, Token, Role, Monster } from '../types';
 import { Edit } from 'lucide-react';
-
-// Fix for React Three Fiber JSX elements not being recognized in this environment
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      cylinderGeometry: any;
-      meshStandardMaterial: any;
-      meshBasicMaterial: any;
-      circleGeometry: any;
-      planeGeometry: any;
-      ambientLight: any;
-      pointLight: any;
-      gridHelper: any;
-    }
-  }
-}
 
 interface MapRendererProps {
   mode: '2D' | '3D';

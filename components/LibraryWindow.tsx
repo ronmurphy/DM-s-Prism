@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Search, Skull, GripVertical, FileJson, Info, Save, Globe, Database, Download } from 'lucide-react';
+import { BookOpen, Search, Skull, GripVertical, FileJson, Info, Save, Globe, Database, Download, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { searchSpells } from '../services/libraryService';
+import { search5eTools, getCompendiumStatus, load5eToolsData } from '../services/fiveToolsService';
+import { getSavedMonsters, saveMonster, deleteMonster, saveCompendiumData } from '../services/dbService';
 import { searchMonstersOpen5e } from '../services/open5eService';
-import { getSavedMonsters, saveMonster, deleteMonster } from '../services/dbService';
 import { Spell, Monster, Ability } from '../types';
 
 const format5eText = (text: string): string => {
@@ -37,14 +37,6 @@ const parseImportSize = (s: any): number => {
     return 1;
 }
 
-const parseOpen5eSize = (s: string): number => {
-    const sl = s.toLowerCase();
-    if (sl.includes('large')) return 2;
-    if (sl.includes('huge')) return 3;
-    if (sl.includes('gargantuan')) return 4;
-    return 1;
-}
-
 const LibraryWindow: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'SPELLS' | 'BESTIARY'>('BESTIARY');
   const [subTab, setSubTab] = useState<'SEARCH' | 'SAVED'>('SAVED');
@@ -58,17 +50,22 @@ const LibraryWindow: React.FC = () => {
   // Monsters
   const [savedMonsters, setSavedMonsters] = useState<Monster[]>([]);
   const [searchResults, setSearchResults] = useState<Monster[]>([]);
-  const [rawOpen5e, setRawOpen5e] = useState<any[]>([]); // To extract size string if needed
+  const [resultSource, setResultSource] = useState<'5e.tools' | 'open5e' | null>(null);
   
   const [isSearching, setIsSearching] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<string | null>(null); // Name of monster currently saving
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
   const [selectedMonster, setSelectedMonster] = useState<Monster | null>(null);
+  
+  // Compendium Status
+  const [compendiumStats, setCompendiumStats] = useState<{ totalCached: number, isComplete: boolean } | null>(null);
 
   // Load saved monsters from IndexedDB on mount
   useEffect(() => {
     loadLibrary();
+    checkCompendium();
   }, []);
 
   const loadLibrary = async () => {
@@ -79,6 +76,20 @@ const LibraryWindow: React.FC = () => {
           console.error("Failed to load library from DB", e);
       }
   };
+  
+  const checkCompendium = async () => {
+      const stats = await getCompendiumStatus();
+      setCompendiumStats({ totalCached: stats.totalCached, isComplete: stats.isComplete });
+  };
+
+  const handleDownloadCompendium = async () => {
+      setLoadingMessage("Starting Download...");
+      setIsSearching(true);
+      await load5eToolsData(true, (msg) => setLoadingMessage(msg));
+      await checkCompendium();
+      setIsSearching(false);
+      setLoadingMessage(null);
+  };
 
   const handleSaveMonster = async (monster: Monster) => {
      setIsSaving(monster.name);
@@ -87,7 +98,7 @@ const LibraryWindow: React.FC = () => {
          await loadLibrary(); // Refresh list
      } catch (e) {
          console.error("Save failed", e);
-         alert("Failed to save monster to local DB.");
+         alert("Failed to save monster to local DB. See console.");
      } finally {
          setIsSaving(null);
      }
@@ -98,6 +109,7 @@ const LibraryWindow: React.FC = () => {
       await loadLibrary();
   };
 
+  // Unified Search Logic
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (activeTab === 'SPELLS') {
@@ -107,29 +119,84 @@ const LibraryWindow: React.FC = () => {
     } else {
         if (!query) return;
         setIsSearching(true);
-        const { monsters, raw } = await searchMonstersOpen5e(query);
-        setSearchResults(monsters);
-        setRawOpen5e(raw);
-        setIsSearching(false);
-        setSubTab('SEARCH');
+        setSearchResults([]);
+        
+        try {
+            // 1. Try 5e.tools (Cached or Network)
+            // We pass a progress callback to update UI if it's downloading for the first time
+            const fiveToolsResults = await search5eTools(query, (msg) => setLoadingMessage(msg));
+            await checkCompendium(); // Update stats after search potentially loads data
+            setLoadingMessage(null);
+
+            if (fiveToolsResults.length > 0) {
+                setSearchResults(fiveToolsResults);
+                setResultSource('5e.tools');
+                setSubTab('SEARCH');
+            } else {
+                 // 2. Fallback to Open5e
+                 const { monsters } = await searchMonstersOpen5e(query);
+                 setSearchResults(monsters);
+                 setResultSource('open5e');
+                 setSubTab('SEARCH');
+            }
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setIsSearching(false);
+        }
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, monster: Monster, rawSizeStr?: string) => {
-    // If we have a raw size string from API (e.g. "Large"), map it to int
+  const handleDragStart = (e: React.DragEvent, monster: Monster) => {
     let finalMonster = { ...monster };
-    if (rawSizeStr) {
-        // From search results
-        finalMonster.size = parseOpen5eSize(rawSizeStr);
-    } else if (!finalMonster.size && monster.type) {
-         // Try to parse from type string like "Large Beast"
-         finalMonster.size = parseOpen5eSize(monster.type);
-    }
     // Ensure default
     if (!finalMonster.size) finalMonster.size = 1;
 
     e.dataTransfer.setData('application/json', JSON.stringify(finalMonster));
     e.dataTransfer.effectAllowed = 'copy';
+  };
+  
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+  
+      setIsSaving("Reading files...");
+      
+      Array.from(files).forEach((file: File) => {
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+              try {
+                  const json = JSON.parse(ev.target?.result as string);
+                  // Check format: 5e.tools typically uses { monster: [...] }
+                  let monsters = [];
+                  if (Array.isArray(json)) {
+                      monsters = json;
+                  } else if (json.monster && Array.isArray(json.monster)) {
+                      monsters = json.monster;
+                  }
+                  
+                  if (monsters.length > 0) {
+                       // Save to compendium cache using filename as key
+                       console.log(`Manually caching ${file.name} with ${monsters.length} entries.`);
+                       await saveCompendiumData(file.name, monsters);
+                  } else {
+                      // Fallback: Try to import as individual saved monsters
+                      setImportJson(JSON.stringify(json)); // Pass to text parser
+                  }
+              } catch (err) {
+                  console.error(`Error parsing ${file.name}`, err);
+              }
+          };
+          reader.readAsText(file);
+      });
+      
+      // Reload logic after short delay
+      setTimeout(async () => {
+          await load5eToolsData(false); // Reload cache from DB
+          await checkCompendium();
+          setIsSaving(null);
+          setShowImport(false);
+      }, 1500);
   };
 
   const parse5eToolsImport = async () => {
@@ -232,7 +299,7 @@ const LibraryWindow: React.FC = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={activeTab === 'BESTIARY' ? "Search Open5e..." : "Search spells..."}
+            placeholder={activeTab === 'BESTIARY' ? "Search..." : "Search spells..."}
             className="w-full bg-slate-950 border border-slate-700 rounded pl-8 pr-2 py-1.5 text-sm text-white focus:border-indigo-500 outline-none"
           />
         </form>
@@ -323,7 +390,11 @@ const LibraryWindow: React.FC = () => {
                     <>
                         <div className="mb-2 flex justify-between items-center">
                              <div className="text-xs text-slate-500 italic py-1">
-                                {subTab === 'SAVED' ? 'Stored in IndexedDB' : 'Open5e API Results'}
+                                {subTab === 'SAVED' ? 'Stored in IndexedDB' : (
+                                    isSearching ? 'Searching...' : 
+                                    (resultSource === '5e.tools' ? 'Results from 5eTools' : 
+                                     resultSource === 'open5e' ? 'Results from Open5e' : 'Online Search')
+                                )}
                              </div>
                             <button 
                                 onClick={() => setShowImport(true)}
@@ -333,10 +404,21 @@ const LibraryWindow: React.FC = () => {
                             </button>
                         </div>
 
-                        {subTab === 'SEARCH' && isSearching && <div className="text-center text-indigo-400 text-sm py-4">Summoning data...</div>}
+                        {subTab === 'SEARCH' && isSearching && (
+                            <div className="flex flex-col items-center justify-center py-6 text-indigo-400">
+                                <Loader2 size={24} className="animate-spin mb-2" />
+                                <span className="text-sm">{loadingMessage || 'Summoning data...'}</span>
+                                {loadingMessage && <span className="text-[10px] text-slate-500 mt-1 text-center max-w-[200px]">Downloading compendium for offline use... This happens once.</span>}
+                            </div>
+                        )}
                         
                         {subTab === 'SEARCH' && !isSearching && searchResults.length === 0 && (
-                            <div className="text-center text-slate-600 text-xs py-4">No results found.</div>
+                            <div className="text-center text-slate-600 text-xs py-4">
+                                No results found. 
+                                {compendiumStats && compendiumStats.totalCached === 0 && (
+                                    <div className="mt-2 text-orange-400">Cache is empty.</div>
+                                )}
+                            </div>
                         )}
 
                         <div className="space-y-2">
@@ -344,7 +426,7 @@ const LibraryWindow: React.FC = () => {
                                 <div 
                                     key={`${monster.name}-${idx}`}
                                     draggable
-                                    onDragStart={(e) => handleDragStart(e, monster, subTab === 'SEARCH' ? rawOpen5e[idx]?.size : undefined)}
+                                    onDragStart={(e) => handleDragStart(e, monster)}
                                     className="p-3 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-indigo-500 rounded cursor-grab active:cursor-grabbing transition-all group relative flex gap-3 items-center"
                                 >
                                     {monster.avatarUrl ? (
@@ -397,19 +479,72 @@ const LibraryWindow: React.FC = () => {
         )}
       </div>
 
+      {/* Compendium Status Footer */}
+      {activeTab === 'BESTIARY' && (
+          <div className="bg-slate-950 p-2 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                  <Database size={10} />
+                  {compendiumStats ? (
+                      <span>Cache: {compendiumStats.totalCached} monsters</span>
+                  ) : (
+                      <span>Checking Cache...</span>
+                  )}
+              </div>
+              
+              {!loadingMessage && compendiumStats && !compendiumStats.isComplete && (
+                  <button 
+                    onClick={handleDownloadCompendium} 
+                    className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-indigo-400 px-2 py-1 rounded border border-slate-700 transition-colors"
+                  >
+                     <Download size={10} /> Download All
+                  </button>
+              )}
+               {!loadingMessage && compendiumStats && compendiumStats.isComplete && (
+                   <span className="text-green-600 flex items-center gap-1"><RefreshCw size={10} /> Up to date</span>
+               )}
+          </div>
+      )}
+
       {showImport && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
               <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 w-full max-w-md shadow-2xl">
                   <h3 className="font-bold text-white mb-2">Import from 5e.tools</h3>
-                  <textarea 
-                    value={importJson}
-                    onChange={(e) => setImportJson(e.target.value)}
-                    className="w-full h-40 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-green-400 mb-3 focus:border-indigo-500 outline-none"
-                    placeholder='Paste JSON here...'
-                  />
-                  <div className="flex justify-end gap-2">
+                  
+                  <div className="space-y-4">
+                      {/* File Upload Option */}
+                      <div className="border-2 border-dashed border-slate-700 rounded p-4 text-center hover:border-indigo-500 transition-colors cursor-pointer relative group">
+                          <Upload size={24} className="mx-auto mb-2 text-slate-500 group-hover:text-indigo-400" />
+                          <p className="text-xs text-slate-400 mb-1">Upload Source JSON (e.g. bestiary-mm.json)</p>
+                          <p className="text-[10px] text-slate-600">This will cache the book locally.</p>
+                          <input 
+                              type="file" 
+                              accept=".json" 
+                              multiple 
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                              onChange={handleFileUpload}
+                          />
+                      </div>
+                      
+                      <div className="relative">
+                          <div className="absolute inset-0 flex items-center">
+                              <span className="w-full border-t border-slate-800" />
+                          </div>
+                          <div className="relative flex justify-center text-xs uppercase">
+                              <span className="bg-slate-900 px-2 text-slate-600">Or Paste Text</span>
+                          </div>
+                      </div>
+
+                      <textarea 
+                        value={importJson}
+                        onChange={(e) => setImportJson(e.target.value)}
+                        className="w-full h-24 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-green-400 mb-3 focus:border-indigo-500 outline-none"
+                        placeholder='Paste array of monsters here...'
+                      />
+                  </div>
+
+                  <div className="flex justify-end gap-2 mt-4">
                       <button onClick={() => setShowImport(false)} className="px-3 py-1 text-xs text-slate-400">Cancel</button>
-                      <button onClick={parse5eToolsImport} className="px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded">Import</button>
+                      <button onClick={parse5eToolsImport} className="px-3 py-1 bg-indigo-600 text-white text-xs font-bold rounded">Import Text</button>
                   </div>
               </div>
           </div>
