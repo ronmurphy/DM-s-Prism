@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Token, Ability, DiceRoll } from '../types';
-import { X, Check, Footprints, ScrollText, Swords, Dices } from 'lucide-react';
+import { X, Check, Footprints, ScrollText, Swords, Dices, Scaling } from 'lucide-react';
 
 interface TokenEditorProps {
   token: Token;
@@ -11,7 +11,8 @@ interface TokenEditorProps {
 }
 
 const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRoll }) => {
-  const [activeTab, setActiveTab] = useState<'STATS' | 'ABILITIES'>('STATS');
+  // If enemy, default to Abilities for stat block view
+  const [activeTab, setActiveTab] = useState<'STATS' | 'ABILITIES'>(token.type === 'enemy' ? 'ABILITIES' : 'STATS');
   
   // Stats Form
   const [name, setName] = useState(token.name);
@@ -19,6 +20,7 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
   const [maxHp, setMaxHp] = useState(token.maxHp);
   const [ac, setAc] = useState(token.ac);
   const [speed, setSpeed] = useState(token.speed || 30);
+  const [size, setSize] = useState(token.size || 1);
   const [previewImage, setPreviewImage] = useState<string | undefined>(token.avatarUrl);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,6 +43,7 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
       hp: Math.min(token.hp, maxHp),
       ac,
       speed,
+      size,
       remainingMovement: Math.min(token.remainingMovement, speed), 
       avatarUrl: previewImage
     });
@@ -83,12 +86,10 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
 
   // Renderer for description with clickable dice
   const renderDescription = (text: string, abilityName: string) => {
-      // Find patterns like "3d6", "1d10 + 4", "1d20" (basic)
-      // We split by capturing group to preserve the delimiters
+      if(!text) return null;
       const parts = text.split(/(\d+d\d+(?:\s*[+-]\s*\d+)?)/g);
       
       return parts.map((part, i) => {
-          // Check if this part is a dice formula
           if (part.match(/^\d+d\d+(?:\s*[+-]\s*\d+)?$/)) {
               return (
                   <button 
@@ -105,13 +106,11 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
       });
   };
 
-  // Logic to determine if we show abilities tab
-  // Only show if it's an 'enemy' (Bestiary) OR if it explicitly has abilities populated.
   const showAbilitiesTab = token.type === 'enemy' || (token.abilities && token.abilities.length > 0);
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg w-full max-w-md shadow-2xl animate-fade-in flex flex-col max-h-[90vh]">
+      <div className="bg-slate-900 border border-slate-700 rounded-lg w-full max-w-lg shadow-2xl animate-fade-in flex flex-col max-h-[90vh]">
         
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b border-slate-800">
@@ -121,7 +120,7 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
               </div>
               <div>
                   <h3 className="text-xl font-bold font-serif text-white">{name}</h3>
-                  <p className="text-xs text-slate-500">{token.type === 'pc' ? 'Player Character' : 'Creature'}</p>
+                  <p className="text-xs text-slate-500">{token.type === 'pc' ? 'Player Character' : 'Creature'} • Size {size}</p>
               </div>
           </div>
           <button onClick={onCancel} className="text-slate-400 hover:text-white"><X size={20} /></button>
@@ -133,19 +132,19 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
                 onClick={() => setActiveTab('STATS')}
                 className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'STATS' ? 'text-indigo-400 border-b-2 border-indigo-500 bg-slate-800/50' : 'text-slate-500 hover:text-white'}`}
             >
-                <Swords size={16} /> Stats
+                <Swords size={16} /> Edit Token
             </button>
             {showAbilitiesTab && (
                 <button 
                     onClick={() => setActiveTab('ABILITIES')}
                     className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'ABILITIES' ? 'text-green-400 border-b-2 border-green-500 bg-slate-800/50' : 'text-slate-500 hover:text-white'}`}
                 >
-                    <ScrollText size={16} /> Abilities
+                    <ScrollText size={16} /> Stat Block
                 </button>
             )}
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1">
+        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
             {activeTab === 'STATS' && (
                 <div className="space-y-4">
                     <div className="flex justify-center mb-4">
@@ -178,6 +177,36 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
                         />
                     </div>
 
+                    <div className="grid grid-cols-2 gap-3">
+                         {/* Size Selector */}
+                        <div>
+                            <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1"><Scaling size={10} /> Size (Grid Cells)</label>
+                            <select 
+                                value={size}
+                                onChange={(e) => setSize(Number(e.target.value))}
+                                className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white focus:border-indigo-500 outline-none text-sm"
+                            >
+                                <option value={1}>Medium / Small (1x1)</option>
+                                <option value={2}>Large (2x2)</option>
+                                <option value={3}>Huge (3x3)</option>
+                                <option value={4}>Gargantuan (4x4)</option>
+                            </select>
+                        </div>
+                         <div>
+                            <label className="block text-xs text-slate-400 mb-1">Color</label>
+                            <div className="flex gap-2 h-8 items-center">
+                            {['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#64748b'].map(c => (
+                                <div 
+                                key={c}
+                                onClick={() => setColor(c)}
+                                className={`w-5 h-5 rounded-full cursor-pointer border-2 transition-transform hover:scale-110 ${color === c ? 'border-white scale-110' : 'border-transparent'}`}
+                                style={{ backgroundColor: c }}
+                                />
+                            ))}
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="grid grid-cols-3 gap-3">
                         <div>
                             <label className="block text-xs text-slate-400 mb-1">Max HP</label>
@@ -205,38 +234,33 @@ const TokenEditor: React.FC<TokenEditorProps> = ({ token, onSave, onCancel, onRo
                             />
                         </div>
                     </div>
-
-                    <div>
-                        <label className="block text-xs text-slate-400 mb-1">Color</label>
-                        <div className="flex gap-2">
-                        {['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#64748b'].map(c => (
-                            <div 
-                            key={c}
-                            onClick={() => setColor(c)}
-                            className={`w-6 h-6 rounded-full cursor-pointer border-2 transition-transform hover:scale-110 ${color === c ? 'border-white scale-110' : 'border-transparent'}`}
-                            style={{ backgroundColor: c }}
-                            />
-                        ))}
-                        </div>
-                    </div>
                 </div>
             )}
 
             {activeTab === 'ABILITIES' && showAbilitiesTab && (
                 <div className="space-y-4">
+                     {/* Mini Header for Stats */}
+                     <div className="grid grid-cols-4 gap-2 text-center bg-slate-800 p-2 rounded border border-slate-700">
+                        <div><div className="text-[10px] text-slate-500">AC</div><div className="font-bold">{ac}</div></div>
+                        <div><div className="text-[10px] text-slate-500">HP</div><div className="font-bold text-green-400">{token.hp}/{maxHp}</div></div>
+                        <div><div className="text-[10px] text-slate-500">SPD</div><div className="font-bold">{speed}</div></div>
+                        <div><div className="text-[10px] text-slate-500">INIT</div><div className="font-bold">+{token.initiative}</div></div>
+                     </div>
+
                     {(!token.abilities || token.abilities.length === 0) ? (
                         <div className="text-center text-slate-500 text-sm py-4">
-                            No abilities found. Try re-importing this monster from 5e.tools.
+                            No abilities found.
                         </div>
                     ) : (
                         token.abilities.map((ability, idx) => (
-                            <div key={idx} className="bg-slate-800/50 p-3 rounded border border-slate-700/50">
+                            <div key={idx} className="bg-slate-800/50 p-3 rounded border border-slate-700/50 hover:bg-slate-800 transition-colors">
                                 <div className="flex justify-between items-center mb-1">
                                     <span className="font-bold text-indigo-300 text-sm">{ability.name}</span>
                                     <span className={`text-[10px] uppercase px-2 py-0.5 rounded text-slate-200 font-bold
                                         ${ability.type === 'action' ? 'bg-red-900/50' : 
                                           ability.type === 'spell' ? 'bg-blue-900/50' : 
-                                          ability.type === 'reaction' ? 'bg-yellow-900/50' : 'bg-slate-700'}
+                                          ability.type === 'reaction' ? 'bg-yellow-900/50' : 
+                                          ability.type === 'legendary' ? 'bg-purple-900/50' : 'bg-slate-700'}
                                     `}>
                                         {ability.type}
                                     </span>

@@ -6,6 +6,24 @@ import * as THREE from 'three';
 import { MapData, Token, Role, Monster } from '../types';
 import { Edit } from 'lucide-react';
 
+// Fix for React Three Fiber JSX elements not being recognized in this environment
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      cylinderGeometry: any;
+      meshStandardMaterial: any;
+      meshBasicMaterial: any;
+      circleGeometry: any;
+      planeGeometry: any;
+      ambientLight: any;
+      pointLight: any;
+      gridHelper: any;
+    }
+  }
+}
+
 interface MapRendererProps {
   mode: '2D' | '3D';
   data: MapData;
@@ -15,7 +33,7 @@ interface MapRendererProps {
   onTokenMove: (id: string, x: number, y: number) => void;
   onFogReveal: (x: number, y: number, radius: number) => void;
   onTokenClick?: (token: Token) => void;
-  onTokenEdit?: (token: Token) => void; // New prop for explicit edit action
+  onTokenEdit?: (token: Token) => void; 
   onTokenDrop?: (monster: Monster, x: number, y: number) => void;
 }
 
@@ -36,21 +54,27 @@ const Token3D: React.FC<{ token: Token; gridSize: number; onClick?: () => void }
      return null;
   }, [token.avatarUrl]);
 
+  // Adjust position for size (center of the multi-tile area)
+  // Size 1: Offset 0.5
+  // Size 2: Offset 1.0
+  // Size 3: Offset 1.5
+  const offset = (token.size * gridSize) / 2;
+
   return (
     <group 
-      position={[token.x * gridSize + gridSize / 2, 0, token.y * gridSize + gridSize / 2]}
+      position={[token.x * gridSize + offset, 0, token.y * gridSize + offset]}
       onClick={(e: any) => { e.stopPropagation(); onClick?.(); }}
     >
       {/* Base */}
       <mesh position={[0, 2, 0]}>
-        <cylinderGeometry args={[gridSize * 0.4, gridSize * 0.4, 4, 32]} />
+        <cylinderGeometry args={[gridSize * 0.4 * token.size, gridSize * 0.4 * token.size, 4, 32]} />
         <meshStandardMaterial color={token.color} />
       </mesh>
       
       {/* Avatar on top */}
       {texture && (
           <mesh position={[0, 4.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[gridSize * 0.38, 32]} />
+              <circleGeometry args={[gridSize * 0.38 * token.size, 32]} />
               <meshBasicMaterial map={texture} />
           </mesh>
       )}
@@ -61,12 +85,12 @@ const Token3D: React.FC<{ token: Token; gridSize: number; onClick?: () => void }
           {token.name}
         </Text>
         {/* HP Bar in 3D */}
-        <mesh position={[0, -gridSize * 0.4, 0]}>
-            <planeGeometry args={[gridSize, gridSize * 0.15]} />
+        <mesh position={[0, -gridSize * 0.4 * token.size, 0]}>
+            <planeGeometry args={[gridSize * token.size, gridSize * 0.15]} />
             <meshBasicMaterial color="#333" />
         </mesh>
-        <mesh position={[(-gridSize + (gridSize * (token.hp / token.maxHp))) / 2, -gridSize * 0.4, 0.01]}>
-             <planeGeometry args={[gridSize * (token.hp / token.maxHp), gridSize * 0.1]} />
+        <mesh position={[(-gridSize * token.size + (gridSize * token.size * (token.hp / token.maxHp))) / 2, -gridSize * 0.4 * token.size, 0.01]}>
+             <planeGeometry args={[gridSize * token.size * (token.hp / token.maxHp), gridSize * 0.1]} />
              <meshBasicMaterial color={token.hp < token.maxHp / 2 ? 'red' : 'green'} />
         </mesh>
       </Billboard>
@@ -121,13 +145,13 @@ interface DragState {
     startGridY: number;
     currentPixelX: number;
     currentPixelY: number;
-    offsetX: number; // Mouse offset from token center
+    offsetX: number; 
     offsetY: number;
     minPixelX: number;
     maxPixelX: number;
     minPixelY: number;
     maxPixelY: number;
-    hasMoved: boolean; // Track if real movement occurred
+    hasMoved: boolean; 
 }
 
 const Scene2D: React.FC<MapRendererProps> = ({ 
@@ -138,14 +162,32 @@ const Scene2D: React.FC<MapRendererProps> = ({
   const dragRef = useRef<DragState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [hoveredTokenId, setHoveredTokenId] = useState<string | null>(null);
 
-  // Helper to get pixel coords for a token
-  const getTokenPixelCoords = (token: Token) => {
+  // Helper to get pixel coords for the CENTER of a token
+  // A 1x1 token at 0,0 center is 25,25 (if grid 50)
+  // A 2x2 token at 0,0 center is 50,50
+  const getTokenCenter = (token: Token) => {
+    const sizeOffset = (token.size * data.gridSize) / 2;
     return {
-       x: token.x * data.gridSize + data.gridSize / 2,
-       y: token.y * data.gridSize + data.gridSize / 2
+       x: token.x * data.gridSize + sizeOffset,
+       y: token.y * data.gridSize + sizeOffset
     };
+  };
+
+  // Helper to get Scaled Mouse Coordinates relative to the internal canvas resolution
+  // This fixes offsets when the sidebar is open or window is resized
+  const getScaledCoords = (e: React.MouseEvent | React.DragEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { x: 0, y: 0 };
+      
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      return {
+          x: (e.clientX - rect.left) * scaleX,
+          y: (e.clientY - rect.top) * scaleY
+      };
   };
 
   useEffect(() => {
@@ -160,7 +202,6 @@ const Scene2D: React.FC<MapRendererProps> = ({
     let animationFrameId: number;
 
     const render = () => {
-        // Clear
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         // 1. Draw Map Background
@@ -168,9 +209,7 @@ const Scene2D: React.FC<MapRendererProps> = ({
             ctx.drawImage(img, 0, 0, data.width, data.height);
         }
 
-        // 2. Draw Movement Overlays (Underneath tokens)
-        
-        // Active Token Overlay (if turn based)
+        // 2. Draw Movement Overlays
         if (activeTokenId) {
             const activeToken = tokens.find(t => t.id === activeTokenId);
             const isDraggingActive = dragRef.current?.id === activeTokenId;
@@ -182,33 +221,45 @@ const Scene2D: React.FC<MapRendererProps> = ({
                 ctx.strokeStyle = activeToken.color;
                 ctx.lineWidth = 1;
 
+                // Range logic for larger tokens: The range expands from the edges
                 const startX = Math.max(0, (activeToken.x - rangeCells) * data.gridSize);
                 const startY = Math.max(0, (activeToken.y - rangeCells) * data.gridSize);
-                const width = Math.min(data.width - startX, (rangeCells * 2 + 1) * data.gridSize);
-                const height = Math.min(data.height - startY, (rangeCells * 2 + 1) * data.gridSize);
+                
+                // Width = (RangeLeft + TokenSize + RangeRight)
+                const totalCellsW = rangeCells * 2 + activeToken.size;
+                const totalCellsH = rangeCells * 2 + activeToken.size;
+
+                const width = Math.min(data.width - startX, totalCellsW * data.gridSize);
+                const height = Math.min(data.height - startY, totalCellsH * data.gridSize);
                 
                 ctx.fillRect(startX, startY, width, height);
                 ctx.strokeRect(startX, startY, width, height);
             }
         }
 
-        // Dragging Overlay (The dynamic one requested)
         if (dragRef.current) {
             const { token, startGridX, startGridY } = dragRef.current;
+            // For dragging overlay, if DM, draw a bigger box or none, but keeping consistent is fine.
+            // Only players are restricted visually by range.
             const rangeCells = Math.floor(token.remainingMovement / 5);
 
-            ctx.fillStyle = hexToRgba(token.color, 0.25);
-            ctx.strokeStyle = token.color;
-            ctx.lineWidth = 2;
-            
-            // Calculate overlay bounds based on START position
-            const startX = Math.max(0, (startGridX - rangeCells) * data.gridSize);
-            const startY = Math.max(0, (startGridY - rangeCells) * data.gridSize);
-            const width = Math.min(data.width - startX, (rangeCells * 2 + 1) * data.gridSize);
-            const height = Math.min(data.height - startY, (rangeCells * 2 + 1) * data.gridSize);
+            if (currentRole === 'PLAYER') {
+                ctx.fillStyle = hexToRgba(token.color, 0.25);
+                ctx.strokeStyle = token.color;
+                ctx.lineWidth = 2;
+                
+                const startX = Math.max(0, (startGridX - rangeCells) * data.gridSize);
+                const startY = Math.max(0, (startGridY - rangeCells) * data.gridSize);
+                
+                const totalCellsW = rangeCells * 2 + token.size;
+                const totalCellsH = rangeCells * 2 + token.size;
 
-            ctx.fillRect(startX, startY, width, height);
-            ctx.strokeRect(startX, startY, width, height);
+                const width = Math.min(data.width - startX, totalCellsW * data.gridSize);
+                const height = Math.min(data.height - startY, totalCellsH * data.gridSize);
+
+                ctx.fillRect(startX, startY, width, height);
+                ctx.strokeRect(startX, startY, width, height);
+            }
         }
 
         // 3. Draw Grid
@@ -225,7 +276,7 @@ const Scene2D: React.FC<MapRendererProps> = ({
         }
         ctx.stroke();
 
-        // 3.5 Drag Over Highlight (Drop Zone)
+        // 3.5 Drop Zone
         if (isDragOver) {
              ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
              ctx.fillRect(0, 0, data.width, data.height);
@@ -242,6 +293,7 @@ const Scene2D: React.FC<MapRendererProps> = ({
         // 4. Draw Tokens
         tokens.forEach(token => {
             const isBeingDragged = dragRef.current?.id === token.id;
+            const sizeOffset = (token.size * data.gridSize) / 2;
             
             let cx, cy;
             
@@ -249,11 +301,12 @@ const Scene2D: React.FC<MapRendererProps> = ({
                 cx = dragRef.current.currentPixelX;
                 cy = dragRef.current.currentPixelY;
             } else {
-                cx = token.x * data.gridSize + data.gridSize / 2;
-                cy = token.y * data.gridSize + data.gridSize / 2;
+                cx = token.x * data.gridSize + sizeOffset;
+                cy = token.y * data.gridSize + sizeOffset;
             }
 
-            const radius = (data.gridSize / 2) * 0.8;
+            // Radius scales with token size, leaving a small gap padding
+            const radius = sizeOffset * 0.9; 
             const isActive = token.id === activeTokenId;
 
             // Highlight Active
@@ -279,6 +332,7 @@ const Scene2D: React.FC<MapRendererProps> = ({
                    ctx.beginPath();
                    ctx.arc(cx, cy, radius - 2, 0, Math.PI * 2);
                    ctx.clip();
+                   // Draw image centered
                    ctx.drawImage(tImg, cx - radius + 2, cy - radius + 2, (radius - 2) * 2, (radius - 2) * 2);
                    ctx.restore();
                 }
@@ -291,7 +345,7 @@ const Scene2D: React.FC<MapRendererProps> = ({
 
             // Name
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 12px sans-serif';
+            ctx.font = `bold ${10 + token.size * 2}px sans-serif`; // Scale font slightly
             ctx.textAlign = 'center';
             ctx.shadowColor="black";
             ctx.shadowBlur=4;
@@ -301,8 +355,8 @@ const Scene2D: React.FC<MapRendererProps> = ({
             ctx.shadowBlur=0;
 
             // HP Bar
-            const hpWidth = 40;
-            const hpHeight = 5;
+            const hpWidth = 40 * token.size;
+            const hpHeight = 5 * token.size;
             const hpY = cy + radius + 10;
             const hpPct = Math.max(0, token.hp / token.maxHp);
             
@@ -315,7 +369,6 @@ const Scene2D: React.FC<MapRendererProps> = ({
         animationFrameId = requestAnimationFrame(render);
     }
 
-    // Start loop
     if (img.complete) {
         render();
     } else {
@@ -324,33 +377,38 @@ const Scene2D: React.FC<MapRendererProps> = ({
 
     return () => cancelAnimationFrame(animationFrameId);
 
-  }, [data, tokens, currentRole, activeTokenId, isDragging, isDragOver, hoveredTokenId]); 
+  }, [data, tokens, currentRole, activeTokenId, isDragging, isDragOver]); 
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getScaledCoords(e);
 
-    const gridX = Math.floor(x / data.gridSize);
-    const gridY = Math.floor(y / data.gridSize);
-
-    // Find clicked token (reverse to get top-most)
-    const clickedToken = [...tokens].reverse().find(t => t.x === gridX && t.y === gridY);
+    // Detection loop (reverse to hit top tokens first)
+    // We check against bounding box of the token based on size
+    const clickedToken = [...tokens].reverse().find(t => {
+        const startX = t.x * data.gridSize;
+        const startY = t.y * data.gridSize;
+        const sizePx = t.size * data.gridSize;
+        
+        return x >= startX && x < startX + sizePx &&
+               y >= startY && y < startY + sizePx;
+    });
     
     if (clickedToken) {
       if (currentRole === 'DM' || clickedToken.type === 'pc') {
          // Setup Drag State
-         const centerX = clickedToken.x * data.gridSize + data.gridSize / 2;
-         const centerY = clickedToken.y * data.gridSize + data.gridSize / 2;
+         const sizeOffset = (clickedToken.size * data.gridSize) / 2;
+         const centerX = clickedToken.x * data.gridSize + sizeOffset;
+         const centerY = clickedToken.y * data.gridSize + sizeOffset;
          
-         // Calculate clamping bounds (Chebyshev distance / Square grid)
-         const rangeCells = Math.floor(clickedToken.remainingMovement / 5);
+         // DM can move freely (infinite range), Players constrained
+         const rangeCells = (currentRole === 'DM') 
+            ? 9999 
+            : Math.floor(clickedToken.remainingMovement / 5);
          
-         const minPixelX = (clickedToken.x - rangeCells) * data.gridSize + data.gridSize / 2;
-         const maxPixelX = (clickedToken.x + rangeCells) * data.gridSize + data.gridSize / 2;
-         const minPixelY = (clickedToken.y - rangeCells) * data.gridSize + data.gridSize / 2;
-         const maxPixelY = (clickedToken.y + rangeCells) * data.gridSize + data.gridSize / 2;
+         const minPixelX = (clickedToken.x - rangeCells) * data.gridSize + sizeOffset;
+         const maxPixelX = (clickedToken.x + rangeCells) * data.gridSize + sizeOffset;
+         const minPixelY = (clickedToken.y - rangeCells) * data.gridSize + sizeOffset;
+         const maxPixelY = (clickedToken.y + rangeCells) * data.gridSize + sizeOffset;
 
          dragRef.current = {
              id: clickedToken.id,
@@ -362,43 +420,40 @@ const Scene2D: React.FC<MapRendererProps> = ({
              offsetX: x - centerX, 
              offsetY: y - centerY,
              minPixelX, maxPixelX, minPixelY, maxPixelY,
-             hasMoved: false // Init tracking
+             hasMoved: false 
          };
          setIsDragging(true);
       }
     } else if (currentRole === 'DM') {
+        const gridX = Math.floor(x / data.gridSize);
+        const gridY = Math.floor(y / data.gridSize);
         onFogReveal(gridX, gridY, 2);
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      if (!dragRef.current) return;
 
-      if (!dragRef.current) {
-         // Hover logic (optional, for cursor change)
-         return;
-      }
-
-      const { offsetX, offsetY, minPixelX, maxPixelX, minPixelY, maxPixelY } = dragRef.current;
+      const { x: mouseX, y: mouseY } = getScaledCoords(e);
+      const { offsetX, offsetY, minPixelX, maxPixelX, minPixelY, maxPixelY, token } = dragRef.current;
+      const sizeOffset = (token.size * data.gridSize) / 2;
 
       // Desired position
       let rawX = mouseX - offsetX;
       let rawY = mouseY - offsetY;
 
-      // Clamp to range
+      // Clamp to range (Players only) or map bounds
+      // If DM, the min/maxPixelX are very large, so this just clamps to map technically
       const clampedX = Math.max(minPixelX, Math.min(rawX, maxPixelX));
       const clampedY = Math.max(minPixelY, Math.min(rawY, maxPixelY));
 
-      // Update ref
       dragRef.current.currentPixelX = clampedX;
       dragRef.current.currentPixelY = clampedY;
 
-      // Check if actually moved significant amount to count as drag
-      if (Math.abs(clampedX - (dragRef.current.startGridX * data.gridSize + data.gridSize/2)) > 5 || 
-          Math.abs(clampedY - (dragRef.current.startGridY * data.gridSize + data.gridSize/2)) > 5) {
+      const startCenterX = dragRef.current.startGridX * data.gridSize + sizeOffset;
+      const startCenterY = dragRef.current.startGridY * data.gridSize + sizeOffset;
+
+      if (Math.abs(clampedX - startCenterX) > 5 || Math.abs(clampedY - startCenterY) > 5) {
           dragRef.current.hasMoved = true;
       }
   };
@@ -407,22 +462,23 @@ const Scene2D: React.FC<MapRendererProps> = ({
     if (!dragRef.current) return;
     
     const { hasMoved, startGridX, startGridY, id, token } = dragRef.current;
-    
+    const sizeOffset = (token.size * data.gridSize) / 2;
+
     if (hasMoved) {
         const finalPixelX = dragRef.current.currentPixelX;
         const finalPixelY = dragRef.current.currentPixelY;
         
-        const gridX = Math.round((finalPixelX - data.gridSize/2) / data.gridSize);
-        const gridY = Math.round((finalPixelY - data.gridSize/2) / data.gridSize);
+        // Calculate top-left grid coordinate from the center position
+        const gridX = Math.round((finalPixelX - sizeOffset) / data.gridSize);
+        const gridY = Math.round((finalPixelY - sizeOffset) / data.gridSize);
 
-        const safeX = Math.max(0, Math.min(gridX, Math.floor(data.width / data.gridSize) - 1));
-        const safeY = Math.max(0, Math.min(gridY, Math.floor(data.height / data.gridSize) - 1));
+        const safeX = Math.max(0, Math.min(gridX, Math.floor(data.width / data.gridSize) - token.size));
+        const safeY = Math.max(0, Math.min(gridY, Math.floor(data.height / data.gridSize) - token.size));
 
         if (safeX !== startGridX || safeY !== startGridY) {
             onTokenMove(id, safeX, safeY);
         }
     } else {
-        // Was a Click (Select)
         onTokenClick?.(token);
     }
     
@@ -455,13 +511,13 @@ const Scene2D: React.FC<MapRendererProps> = ({
       if (monsterData && onTokenDrop) {
           try {
              const monster = JSON.parse(monsterData) as Monster;
-             const rect = canvasRef.current?.getBoundingClientRect();
-             if (rect) {
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                const gridX = Math.floor(x / data.gridSize);
-                const gridY = Math.floor(y / data.gridSize);
-                onTokenDrop(monster, gridX, gridY);
+             const { x, y } = getScaledCoords(e);
+             
+             // Check if within bounds (scaling handled by getScaledCoords)
+             if (x >= 0 && y >= 0 && x <= data.width && y <= data.height) {
+                 const gridX = Math.floor(x / data.gridSize);
+                 const gridY = Math.floor(y / data.gridSize);
+                 onTokenDrop(monster, gridX, gridY);
              }
           } catch(e) {
               console.error("Failed to parse monster drop", e);
@@ -470,7 +526,6 @@ const Scene2D: React.FC<MapRendererProps> = ({
   };
 
   const activeToken = tokens.find(t => t.id === activeTokenId);
-  const activeTokenPos = activeToken ? getTokenPixelCoords(activeToken) : null;
 
   return (
     <div 
@@ -491,36 +546,6 @@ const Scene2D: React.FC<MapRendererProps> = ({
         className="cursor-pointer mx-auto block"
         style={{ maxWidth: '100%' }}
       />
-      
-      {/* Edit Button Overlay for Active Token */}
-      {activeToken && activeTokenPos && currentRole === 'DM' && !isDragging && (
-          <div 
-            className="absolute z-10"
-            style={{ 
-                left: `calc(50% - ${data.width/2}px + ${activeTokenPos.x}px)`, 
-                top: `0`, // Position relies on canvas being centered mostly, but flex layout complicates absolute positioning relative to canvas pixels inside a div.
-                // Re-calculating proper absolute position relative to the container div:
-                // Since canvas is mx-auto, and container allows scrolling, we need to be careful.
-                // Simplified: Just center it if we assume canvas fills or is centered. 
-                // Better approach: Just use standard transform centered on the container if we knew scroll.
-                // For now, let's put it at the very top-left of the CONTAINER but offset by grid logic if possible, 
-                // OR simpler: Render it inside the canvas via the ctx loop? No, html overlay is better for buttons.
-                
-                // Let's try a simpler approach: Just a floating Edit button active only when a token is selected, 
-                // but positioning it precisely over the token in a scrolled div is hard without sync.
-                // We will render a fixed overlay UI layer instead.
-            }} 
-          >
-             {/* 
-                Actually, getting HTML elements to stick to Canvas elements during scroll is tricky.
-                Instead, let's just use the fact that the DM can click the "Edit" button in the Combat Tracker 
-                OR we render the button graphic on the canvas and detect clicks there.
-                
-                BUT, for this specific request "add in the edit token as a button to press", 
-                we can render a button that just sits in the corner saying "Edit Selected Token: [Name]"
-             */}
-          </div>
-      )}
       
       {activeToken && currentRole === 'DM' && (
            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-slate-800/90 border border-slate-600 rounded p-2 flex gap-4 items-center shadow-xl animate-fade-in pointer-events-auto">

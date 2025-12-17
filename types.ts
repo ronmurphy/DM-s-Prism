@@ -78,6 +78,7 @@ export interface Monster {
   actions?: { name: string; desc: string }[];
   abilities?: Ability[];
   cr?: string;
+  size?: number;
 }
 
 export interface Character {

@@ -185,45 +185,56 @@ const App: React.FC = () => {
   const handleTokenMove = (id: string, x: number, y: number) => {
     const token = tokens.find(t => t.id === id);
     if (!token) return;
-    
-    // Permissions & Turn Enforcement
+
+    // Calculate movement cost
+    // We treat diagonals as 5ft (Chebyshev distance) for simplicity in grid movement, 
+    // or standard D&D 5e grid rule variant. 
+    const distanceX = Math.abs(x - token.x);
+    const distanceY = Math.abs(y - token.y);
+    const distanceInCells = Math.max(distanceX, distanceY);
+    const cost = distanceInCells * 5;
+
+    // Check permissions and budget if Player
     if (user?.role === 'PLAYER') {
-        // Can only move own token
         const isOwnToken = token.id === user.characterId || token.characterSheetId === user.characterId || token.name === user.name;
         if (!isOwnToken) return;
 
-        // STRICT TURN ENFORCEMENT
+        // Turn Enforcement
         if (activeTokenId && activeTokenId !== token.id) {
             handleSendMessage(`❌ It is not your turn! Wait for ${tokens.find(t => t.id === activeTokenId)?.name}.`, 'system', user.name);
             return; 
         }
 
-        // Movement Budget Check
-        const distanceX = Math.abs(x - token.x);
-        const distanceY = Math.abs(y - token.y);
-        const distanceInCells = Math.max(distanceX, distanceY);
-        const cost = distanceInCells * 5;
-
+        // Budget Check
         if (token.remainingMovement < cost) {
-            handleSendMessage(`❌ Not enough movement!`, 'system', user.name);
+            handleSendMessage(`❌ Not enough movement! (${cost}ft required, ${token.remainingMovement}ft left)`, 'system', user.name);
             return;
         }
-
-        // Apply Move
-        const updated = { 
-            ...token, 
-            x, 
-            y, 
-            remainingMovement: token.remainingMovement - cost 
-        };
-        setTokens(prev => prev.map(t => t.id === id ? updated : t));
-        updateTokenInDB(updated);
-    } else {
-        // DM can move anything anywhere
-        const updated = { ...token, x, y };
-        setTokens(prev => prev.map(t => t.id === id ? updated : t));
-        updateTokenInDB(updated);
     }
+
+    // Apply Move & Deduct Movement
+    // If not in combat (no active turn), movement is free/untracked.
+    let newRemaining = token.remainingMovement;
+    
+    if (activeTokenId) {
+        // Deduct movement if we are in combat tracking mode
+        newRemaining = Math.max(0, token.remainingMovement - cost);
+    } else {
+        // Reset to max if out of combat (exploration mode)
+        newRemaining = token.speed;
+    }
+
+    const updated = { 
+        ...token, 
+        x, 
+        y, 
+        remainingMovement: newRemaining 
+    };
+
+    // Optimistic Update
+    setTokens(prev => prev.map(t => t.id === id ? updated : t));
+    // DB Update
+    updateTokenInDB(updated);
   };
 
   const handleTokenDrop = async (monster: Monster, x: number, y: number) => {
@@ -245,7 +256,7 @@ const App: React.FC = () => {
           ac: monster.ac,
           speed: monster.speed,
           remainingMovement: monster.speed,
-          size: 1,
+          size: monster.size || 1, // Use size from monster data
           initiative: initiative, // Set the rolled init
           statusEffects: [],
           avatarUrl: monster.avatarUrl,
@@ -370,17 +381,29 @@ const App: React.FC = () => {
       
       // Loop back to 0 if at end
       let nextIndex = currentIndex + 1;
+      
       if (nextIndex >= sortedTokens.length) {
           nextIndex = 0;
-          handleSendMessage(`🔄 Round Complete! Back to top of initiative.`, 'system');
+          handleSendMessage(`🔄 New Round! All movement reset.`, 'system');
+          
+          // Reset EVERYONE's movement at the top of the round
+          const resetTokens = sortedTokens.map(t => ({...t, remainingMovement: t.speed}));
+          setTokens(resetTokens);
+          resetTokens.forEach(t => updateTokenInDB(t));
+
+          const nextToken = resetTokens[0];
+          setActiveTokenId(nextToken.id);
+          handleSendMessage(`⚔️ It is now ${nextToken.name}'s turn!`, 'system');
+          return;
       }
       
       const nextToken = sortedTokens[nextIndex];
       
       if (nextToken) {
-          // Reset Movement for the NEW active creature
+          // Reset Movement for the NEW active creature (Start of Turn Rule)
           const resetToken = { ...nextToken, remainingMovement: nextToken.speed };
           updateTokenInDB(resetToken);
+          setTokens(prev => prev.map(t => t.id === resetToken.id ? resetToken : t));
           
           setActiveTokenId(nextToken.id);
           handleSendMessage(`⚔️ It is now ${nextToken.name}'s turn!`, 'system');
@@ -392,7 +415,8 @@ const App: React.FC = () => {
       tokens.forEach(t => {
           updateTokenInDB({ ...t, remainingMovement: t.speed, initiative: 0 });
       });
-      handleSendMessage(`Combat reset. Initiatives cleared.`, 'system');
+      setTokens(prev => prev.map(t => ({ ...t, remainingMovement: t.speed, initiative: 0 })));
+      handleSendMessage(`Combat reset. Initiatives cleared. Movement restored.`, 'system');
   };
 
   const isMyTurn = () => {
