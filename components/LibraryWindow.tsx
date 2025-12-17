@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Search, Skull, GripVertical, FileJson, Info, Save, Globe } from 'lucide-react';
+import { BookOpen, Search, Skull, GripVertical, FileJson, Info, Save, Globe, Database, Download } from 'lucide-react';
 import { searchSpells } from '../services/libraryService';
 import { searchMonstersOpen5e } from '../services/open5eService';
+import { getSavedMonsters, saveMonster, deleteMonster } from '../services/dbService';
 import { Spell, Monster, Ability } from '../types';
 
 const format5eText = (text: string): string => {
@@ -60,37 +61,41 @@ const LibraryWindow: React.FC = () => {
   const [rawOpen5e, setRawOpen5e] = useState<any[]>([]); // To extract size string if needed
   
   const [isSearching, setIsSearching] = useState(false);
+  const [isSaving, setIsSaving] = useState<string | null>(null); // Name of monster currently saving
   const [showImport, setShowImport] = useState(false);
   const [importJson, setImportJson] = useState('');
   const [selectedMonster, setSelectedMonster] = useState<Monster | null>(null);
 
-  // Load saved monsters on mount
+  // Load saved monsters from IndexedDB on mount
   useEffect(() => {
-    const saved = localStorage.getItem('dnd_vtt_saved_monsters');
-    if (saved) {
-        try {
-            setSavedMonsters(JSON.parse(saved));
-        } catch(e) { console.error(e); }
-    }
+    loadLibrary();
   }, []);
 
-  const saveMonster = (monster: Monster) => {
-     setSavedMonsters(prev => {
-         // Avoid dups
-         if (prev.find(m => m.name === monster.name)) return prev;
-         const updated = [...prev, monster];
-         localStorage.setItem('dnd_vtt_saved_monsters', JSON.stringify(updated));
-         return updated;
-     });
-     alert(`Saved ${monster.name} to library.`);
+  const loadLibrary = async () => {
+      try {
+          const monsters = await getSavedMonsters();
+          setSavedMonsters(monsters);
+      } catch (e) {
+          console.error("Failed to load library from DB", e);
+      }
   };
 
-  const deleteSavedMonster = (name: string) => {
-      setSavedMonsters(prev => {
-          const updated = prev.filter(m => m.name !== name);
-          localStorage.setItem('dnd_vtt_saved_monsters', JSON.stringify(updated));
-          return updated;
-      });
+  const handleSaveMonster = async (monster: Monster) => {
+     setIsSaving(monster.name);
+     try {
+         await saveMonster(monster);
+         await loadLibrary(); // Refresh list
+     } catch (e) {
+         console.error("Save failed", e);
+         alert("Failed to save monster to local DB.");
+     } finally {
+         setIsSaving(null);
+     }
+  };
+
+  const handleDeleteSavedMonster = async (name: string) => {
+      await deleteMonster(name);
+      await loadLibrary();
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -127,12 +132,14 @@ const LibraryWindow: React.FC = () => {
     e.dataTransfer.effectAllowed = 'copy';
   };
 
-  const parse5eToolsImport = () => {
+  const parse5eToolsImport = async () => {
       try {
           const data = JSON.parse(importJson);
           const list = Array.isArray(data) ? data : [data];
           
-          const newMonsters: Monster[] = list.map((m: any) => {
+          setIsSaving("Importing...");
+
+          for (const m of list) {
               const name = m.name || "Unknown";
               const source = m.source || "MM"; 
               const avatarUrl = `https://5e.tools/img/bestiary/tokens/${source}/${encodeURIComponent(name)}.webp`;
@@ -172,7 +179,7 @@ const LibraryWindow: React.FC = () => {
                   });
               }
 
-              return {
+              const monsterObj: Monster = {
                 name: name,
                 source: source,
                 avatarUrl: avatarUrl,
@@ -185,21 +192,19 @@ const LibraryWindow: React.FC = () => {
                 abilities: abilities,
                 size: sizeInt
               };
-          });
 
-          // Auto save imported
-          const updated = [...savedMonsters, ...newMonsters];
-          // dedupe by name
-          const unique = updated.filter((v,i,a)=>a.findIndex(t=>(t.name===v.name))===i);
-          setSavedMonsters(unique);
-          localStorage.setItem('dnd_vtt_saved_monsters', JSON.stringify(unique));
-          
+              await saveMonster(monsterObj);
+          }
+
+          await loadLibrary();
           setImportJson('');
           setShowImport(false);
           setSubTab('SAVED');
       } catch (e) {
           console.error(e);
-          alert("Invalid JSON format.");
+          alert("Invalid JSON format or Import Error.");
+      } finally {
+          setIsSaving(null);
       }
   };
 
@@ -236,15 +241,15 @@ const LibraryWindow: React.FC = () => {
             <div className="flex text-xs mt-2 border-b border-slate-700">
                 <button 
                     onClick={() => setSubTab('SAVED')}
-                    className={`px-3 py-1 ${subTab === 'SAVED' ? 'text-indigo-400 border-b border-indigo-500' : 'text-slate-500'}`}
+                    className={`px-3 py-1 flex items-center gap-2 ${subTab === 'SAVED' ? 'text-indigo-400 border-b border-indigo-500' : 'text-slate-500'}`}
                 >
-                    Saved ({savedMonsters.length})
+                    <Database size={10} /> Local ({savedMonsters.length})
                 </button>
                 <button 
                      onClick={() => setSubTab('SEARCH')}
-                     className={`px-3 py-1 ${subTab === 'SEARCH' ? 'text-indigo-400 border-b border-indigo-500' : 'text-slate-500'}`}
+                     className={`px-3 py-1 flex items-center gap-2 ${subTab === 'SEARCH' ? 'text-indigo-400 border-b border-indigo-500' : 'text-slate-500'}`}
                 >
-                    Online Results
+                    <Globe size={10} /> Online
                 </button>
             </div>
         )}
@@ -316,9 +321,9 @@ const LibraryWindow: React.FC = () => {
                      </div>
                 ) : (
                     <>
-                        <div className="mb-2 flex justify-between">
+                        <div className="mb-2 flex justify-between items-center">
                              <div className="text-xs text-slate-500 italic py-1">
-                                {subTab === 'SAVED' ? 'Local Library' : 'Open5e API Results'}
+                                {subTab === 'SAVED' ? 'Stored in IndexedDB' : 'Open5e API Results'}
                              </div>
                             <button 
                                 onClick={() => setShowImport(true)}
@@ -361,10 +366,17 @@ const LibraryWindow: React.FC = () => {
                                             <div className="font-bold text-sm text-red-200 truncate">{monster.name}</div>
                                             <div className="flex gap-2">
                                                  {subTab === 'SEARCH' && (
-                                                     <button onClick={() => saveMonster(monster)} className="text-slate-500 hover:text-green-400" title="Save to Library"><Save size={14}/></button>
+                                                     <button 
+                                                        onClick={() => handleSaveMonster(monster)} 
+                                                        className="text-slate-500 hover:text-green-400 disabled:opacity-50" 
+                                                        title="Save to Library"
+                                                        disabled={isSaving === monster.name}
+                                                     >
+                                                         {isSaving === monster.name ? <Download size={14} className="animate-bounce" /> : <Save size={14}/>}
+                                                     </button>
                                                  )}
                                                  {subTab === 'SAVED' && (
-                                                     <button onClick={() => deleteSavedMonster(monster.name)} className="text-slate-600 hover:text-red-400" title="Remove"><Skull size={14}/></button>
+                                                     <button onClick={() => handleDeleteSavedMonster(monster.name)} className="text-slate-600 hover:text-red-400" title="Remove"><Skull size={14}/></button>
                                                  )}
                                                  <button onClick={() => setSelectedMonster(monster)} className="text-slate-500 hover:text-white" title="View Stats"><Info size={14}/></button>
                                                  <GripVertical size={16} className="text-slate-600 group-hover:text-indigo-400" />

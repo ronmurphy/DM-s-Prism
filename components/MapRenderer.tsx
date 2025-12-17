@@ -49,7 +49,9 @@ const hexToRgba = (hex: string, alpha: number) => {
 const Token3D: React.FC<{ token: Token; gridSize: number; onClick?: () => void }> = ({ token, gridSize, onClick }) => {
   const texture = useMemo(() => {
      if (token.avatarUrl) {
-         return new THREE.TextureLoader().load(token.avatarUrl);
+         const loader = new THREE.TextureLoader();
+         loader.setCrossOrigin('anonymous');
+         return loader.load(token.avatarUrl);
      }
      return null;
   }, [token.avatarUrl]);
@@ -59,54 +61,75 @@ const Token3D: React.FC<{ token: Token; gridSize: number; onClick?: () => void }
   // Size 2: Offset 1.0
   // Size 3: Offset 1.5
   const offset = (token.size * gridSize) / 2;
+  const height = gridSize * token.size;
 
   return (
     <group 
       position={[token.x * gridSize + offset, 0, token.y * gridSize + offset]}
       onClick={(e: any) => { e.stopPropagation(); onClick?.(); }}
     >
-      {/* Base */}
+      {/* Base Stand */}
       <mesh position={[0, 2, 0]}>
-        <cylinderGeometry args={[gridSize * 0.4 * token.size, gridSize * 0.4 * token.size, 4, 32]} />
+        <cylinderGeometry args={[gridSize * 0.4 * token.size, gridSize * 0.45 * token.size, 4, 32]} />
         <meshStandardMaterial color={token.color} />
       </mesh>
       
-      {/* Avatar on top */}
-      {texture && (
-          <mesh position={[0, 4.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[gridSize * 0.38 * token.size, 32]} />
-              <meshBasicMaterial map={texture} />
-          </mesh>
-      )}
+      {/* Vertical Billboard (Paper Mini Style) */}
+      <Billboard position={[0, (height / 2) + 4, 0]} follow={true} lockX={false} lockY={false} lockZ={false}>
+          {texture ? (
+              <mesh>
+                  <planeGeometry args={[height, height]} />
+                  <meshBasicMaterial map={texture} transparent={true} side={THREE.DoubleSide} alphaTest={0.5} />
+              </mesh>
+          ) : (
+              <mesh>
+                  <planeGeometry args={[height * 0.8, height * 0.8]} />
+                  <meshBasicMaterial color={token.color} />
+              </mesh>
+          )}
 
-      {/* Label */}
-      <Billboard position={[0, 8, 0]}>
-        <Text fontSize={gridSize * 0.3} color="white" outlineWidth={0.5} outlineColor="black">
-          {token.name}
-        </Text>
-        {/* HP Bar in 3D */}
-        <mesh position={[0, -gridSize * 0.4 * token.size, 0]}>
-            <planeGeometry args={[gridSize * token.size, gridSize * 0.15]} />
-            <meshBasicMaterial color="#333" />
-        </mesh>
-        <mesh position={[(-gridSize * token.size + (gridSize * token.size * (token.hp / token.maxHp))) / 2, -gridSize * 0.4 * token.size, 0.01]}>
-             <planeGeometry args={[gridSize * token.size * (token.hp / token.maxHp), gridSize * 0.1]} />
-             <meshBasicMaterial color={token.hp < token.maxHp / 2 ? 'red' : 'green'} />
-        </mesh>
+          {/* Name Tag */}
+          <Text 
+            position={[0, height / 2 + 10, 0]} 
+            fontSize={gridSize * 0.25} 
+            color="white" 
+            outlineWidth={2} 
+            outlineColor="black"
+            anchorY="bottom"
+          >
+            {token.name}
+          </Text>
+
+          {/* HP Bar */}
+           <group position={[0, -height / 2 - 5, 0]}>
+                <mesh>
+                    <planeGeometry args={[gridSize * token.size, 5]} />
+                    <meshBasicMaterial color="#333" />
+                </mesh>
+                <mesh position={[(-gridSize * token.size + (gridSize * token.size * (token.hp / token.maxHp))) / 2, 0, 0.1]}>
+                    <planeGeometry args={[gridSize * token.size * (token.hp / token.maxHp), 4]} />
+                    <meshBasicMaterial color={token.hp < token.maxHp / 2 ? 'red' : 'green'} />
+                </mesh>
+           </group>
       </Billboard>
     </group>
   );
 };
 
 const MapPlane: React.FC<{ imageUrl: string; width: number; height: number }> = ({ imageUrl, width, height }) => {
-  const texture = useMemo(() => new THREE.TextureLoader().load(imageUrl), [imageUrl]);
+  const texture = useMemo(() => {
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    const tex = loader.load(imageUrl);
+    
+    // Fix texture orientation
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.rotation = -Math.PI / 2;
+    tex.center.set(0.5, 0.5);
+    return tex;
+  }, [imageUrl]);
   
-  // Fix texture orientation
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.rotation = -Math.PI / 2;
-  texture.center.set(0.5, 0.5);
-
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[width / 2, -0.1, height / 2]}>
       <planeGeometry args={[width, height]} />
